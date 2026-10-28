@@ -261,19 +261,28 @@ bool IFeature_Dx11wDx12::Init(ID3D11Device* InDevice, ID3D11DeviceContext* InCon
 bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NGX_Parameter* InParameters)
 {
     // Frees deferred objects even when presents aren't hooked
-    DeferredRelease::Collect();
+    if ((_frameCount & 3) == 0)
+        DeferredRelease::Collect();
 
     LOG_FUNC();
 
     if (!IsInited())
         return false;
 
-    ID3D11DeviceContext4* dc;
-    auto result = InDeviceContext->QueryInterface(IID_PPV_ARGS(&dc));
+    ID3D11DeviceContext4* dc = nullptr;
+    HRESULT result = S_OK;
+    if (InDeviceContext == Dx11DeviceContext)
+    {
+        dc = Dx11DeviceContext;
+    }
+    else
+    {
+        result = InDeviceContext->QueryInterface(IID_PPV_ARGS(&dc));
+    }
 
     ScopedGpuTime_Dx11 scopedGpuTime(UpscalerTime.get(), InDeviceContext);
 
-    if (result != S_OK)
+    if (InDeviceContext != Dx11DeviceContext && result != S_OK)
     {
         LOG_ERROR("QueryInterface error: {0:x}", result);
         return false;
