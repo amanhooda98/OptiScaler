@@ -267,9 +267,11 @@ bool Dx11WithDx12::SyncDx12ToDx11()
 
     if (UseCpuWaitForDx12())
     {
-        // Upscaler work is short, polling avoids the event wake up latency under Wine
+        // Upscaler work is short, polling avoids the event wake up latency under Wine.
+        // Keep the busy spin short to avoid burning a rendering-thread core when the GPU
+        // still has more than a sub-millisecond of work left.
         const auto spinStart = Util::MillisecondsNow();
-        while (Util::MillisecondsNow() - spinStart < 2.0)
+        while (Util::MillisecondsNow() - spinStart < 0.25)
         {
             if (Dx12FenceTextureCopy->GetCompletedValue() >= fenceValue)
                 return true;
@@ -713,6 +715,33 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
     const bool hasOpenDx12Resource = shared->Dx12Resource != nullptr && shared->Dx12Handle == shared->Dx11Handle;
 
     texture->Release();
+
+    // Many game resources are reused across frames.  The D3D11 handle opened in D3D12 is
+    // immutable for the lifetime of matching source/descriptor state, so reuse it directly
+    // and only perform the required per-frame ownership copies/conversions.
+    if (shared->SourceTexture == resource && sameUsage && sameDx12Device && hasOpenDx12Resource &&
+        (!shared->OwnsSharedTexture || shared->SharedTexture != nullptr))
+    {
+        if (shared->OwnsSharedTexture && copy)
+        {
+            if (depth && shared->DepthTransfer != nullptr && shared->DepthTransfer->Buffer() != nullptr)
+            {
+                if (!shared->DepthTransfer->Dispatch(Dx11Device, Dx11DeviceContext, shared->SourceTexture,
+                                                  shared->DepthTransfer->Buffer()))
+                {
+                    LOG_ERROR("{} persistent depth transfer dispatch failed", name);
+                    return false;
+                }
+            }
+            else if (shared->SharedTexture != nullptr)
+            {
+                Dx11DeviceContext->CopyResource(shared->SharedTexture, resource);
+            }
+        }
+
+        shared->LastPreparedFrame = frameId;
+        return true;
+    }
 
     if (sameSource && sameSourceDesc && sameFrame && sameUsage && sameDx12Device && hasOpenDx12Resource)
     {

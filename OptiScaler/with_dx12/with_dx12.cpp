@@ -4,6 +4,7 @@
 
 #include <proxies/DXGI_Proxy.h>
 #include <proxies/D3D12_Proxy.h>
+#include <hooks/D3D12_Hooks.h>
 
 HRESULT CreateD3D12DeviceOnAdapter(IDXGIAdapter* adapter, D3D_FEATURE_LEVEL featureLevel, ID3D12Device** device)
 {
@@ -30,6 +31,9 @@ void WithDx12::UpdateStateObjects()
 {
     State::Instance().currentD3D12Device = _d3d12Device;
     State::Instance().currentCommandQueue = _d3d12CommandQueue;
+
+    if (_d3d12Device != nullptr)
+        D3D12Hooks::HookDevice(_d3d12Device);
 }
 
 void WithDx12::SetD3D12Objects(ID3D12Device* InDevice, ID3D12CommandQueue* InCommandQueue,
