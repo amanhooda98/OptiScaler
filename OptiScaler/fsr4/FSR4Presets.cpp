@@ -4,6 +4,7 @@
 #include <scanner/rtti.h>
 #include <scanner/scanner.h>
 #include <detours/detours.h>
+#include <algorithm>
 
 namespace
 {
@@ -222,11 +223,17 @@ void* FindCreateModel(HMODULE module)
         }
     }
 
-    if (candidates.size() != 1)
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+
+    if (candidates.empty())
     {
-        LOG_ERROR("Expected one model creation call in FSR 4 dispatch, found {}", candidates.size());
+        LOG_ERROR("Expected at least one model creation call in FSR 4 dispatch, found none");
         return nullptr;
     }
+
+    if (candidates.size() != 1)
+        LOG_WARN("Multiple distinct FSR 4 model creation calls found ({}); using the first one", candidates.size());
 
     return candidates.front();
 }
@@ -236,10 +243,6 @@ void* FindCreateModel(HMODULE module)
 void FSR4Presets::Hook(HMODULE module)
 {
     if (module == nullptr)
-        return;
-
-    // FSR 4.1.2 changes model creation arguments; only touch model creation when a preset override is requested.
-    if (!Config::Instance()->Fsr4Preset.has_value())
         return;
 
     std::scoped_lock lock(hookMutex);
