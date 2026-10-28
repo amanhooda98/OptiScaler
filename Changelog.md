@@ -304,7 +304,7 @@ This build adds **experimental** Frame Generation support to `v0.6.8-pre4` for D
 * Added option for loading `ReShade64.dll`
 * Added crude reimplementation of [EndlesslyFlowering](https://github.com/EndlesslyFlowering)'s [AutoHDR-ReShade](https://github.com/EndlesslyFlowering/AutoHDR-ReShade) `ForceHDR` and `UseHDR10` options, don't forget to use `Inverse ToneMapping` shaders
 * Added auto disabling of Epic Overlay when using FSR-FG swapchain
-* Added FSR 3.1.2 support
+* Added FSR 3.1.5 support (native DX11 port)
 * Added resource barrier fixes to FG inputs too (Velocity & Depth, again fixes Death Stranding)
 * Added FG Rectangle option for games with black bars (ultra wide etc)
 * Added Source Api info to menu (DLSS/XeSS)
