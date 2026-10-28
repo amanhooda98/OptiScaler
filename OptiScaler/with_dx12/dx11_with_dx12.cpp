@@ -706,7 +706,10 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
     if (stableSource && sourceUsageMatches && shared->OpenedDx12Device == dx12Device && stableHasOpenDx12Resource &&
         (!shared->OwnsSharedTexture || shared->SharedTexture != nullptr))
     {
-        if (shared->OwnsSharedTexture && copy)
+        // Avoid repeating the ownership copy when the same cache entry is prepared twice in one frame.
+        // The source/D3D12 handle is still refreshed by the immutable-state guard above, but the
+        // per-frame upload stays idempotent when the producer has not changed its source.
+        if (shared->OwnsSharedTexture && copy && shared->LastPreparedFrame != frameId)
         {
             if (depth && shared->DepthTransfer != nullptr && shared->DepthTransfer->Buffer() != nullptr)
             {
@@ -754,7 +757,7 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
     if (shared->SourceTexture == resource && sameUsage && sameDx12Device && hasOpenDx12Resource &&
         (!shared->OwnsSharedTexture || shared->SharedTexture != nullptr))
     {
-        if (shared->OwnsSharedTexture && copy)
+        if (shared->OwnsSharedTexture && copy && shared->LastPreparedFrame != frameId)
         {
             if (depth && shared->DepthTransfer != nullptr && shared->DepthTransfer->Buffer() != nullptr)
             {
