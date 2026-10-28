@@ -906,8 +906,8 @@ bool GetNgxD3D11Resource(const NVSDK_NGX_Parameter* parameters, const char* para
 
     *outResource = nullptr;
 
-    if (parameters->Get(paramName, outResource) != NVSDK_NGX_Result_Success)
-        parameters->Get(paramName, (void**) outResource);
+    if (parameters->Get(paramName, (void**) outResource) != NVSDK_NGX_Result_Success)
+        return false;
 
     return *outResource != nullptr;
 }
