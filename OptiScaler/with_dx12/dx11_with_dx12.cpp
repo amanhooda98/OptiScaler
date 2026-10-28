@@ -695,6 +695,37 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
     if (resource == nullptr || shared == nullptr || dx12Device == nullptr)
         return false;
 
+    // Fast path for resources that have already been resolved through this cache entry. Reusing the original COM identity
+    // avoids one QueryInterface, one GetDesc, and one Release per texture on every frame. This is intentionally limited
+    // to entries whose opened D3D12 resource matches the shared handle, so behavior remains identical when state changes.
+    const bool stableSource = shared->SourceTexture != nullptr &&
+                              reinterpret_cast<ID3D11Resource*>(shared->SourceTexture) == resource;
+    const bool sourceUsageMatches = shared->LastPreparedCopy == copy && shared->LastPreparedDepth == depth;
+    const bool stableHasOpenDx12Resource = shared->Dx12Resource != nullptr && shared->Dx12Handle == shared->Dx11Handle;
+    if (stableSource && sourceUsageMatches && shared->OpenedDx12Device == dx12Device && stableHasOpenDx12Resource &&
+        (!shared->OwnsSharedTexture || shared->SharedTexture != nullptr))
+    {
+        if (shared->OwnsSharedTexture && copy)
+        {
+            if (depth && shared->DepthTransfer != nullptr && shared->DepthTransfer->Buffer() != nullptr)
+            {
+                if (!shared->DepthTransfer->Dispatch(Dx11Device, Dx11DeviceContext, shared->SourceTexture,
+                                                  shared->DepthTransfer->Buffer()))
+                {
+                    LOG_ERROR("{} persistent depth transfer dispatch failed", name);
+                    return false;
+                }
+            }
+            else if (shared->SharedTexture != nullptr)
+            {
+                Dx11DeviceContext->CopyResource(shared->SharedTexture, resource);
+            }
+        }
+
+        shared->LastPreparedFrame = frameId;
+        return true;
+    }
+
     ID3D11Texture2D* texture = nullptr;
     auto result = resource->QueryInterface(IID_PPV_ARGS(&texture));
     if (result != S_OK || texture == nullptr)
