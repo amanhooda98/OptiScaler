@@ -345,8 +345,7 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     ComPtr<ID3D11RenderTargetView> rawRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ComPtr<ID3D11DepthStencilView> restoreDSV = nullptr;
     InDeviceContext->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
-                                        reinterpret_cast<ID3D11RenderTargetView**>(rawRTVs),
-                                        restoreDSV.GetAddressOf());
+                                        reinterpret_cast<ID3D11RenderTargetView**>(rawRTVs), restoreDSV.GetAddressOf());
 
     ID3D11RenderTargetView* nullRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     for (UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)

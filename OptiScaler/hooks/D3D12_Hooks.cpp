@@ -2213,7 +2213,8 @@ static void SpoofNative16BitShaderOps(ID3D12Device* device)
     if (device == nullptr)
         return;
 
-    auto isSpoofed = [device]() {
+    auto isSpoofed = [device]()
+    {
         D3D12_FEATURE_DATA_D3D12_OPTIONS4 o = {};
         return SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &o, sizeof(o))) &&
                o.Native16BitShaderOpsSupported;
@@ -2240,7 +2241,7 @@ static void SpoofNative16BitShaderOps(ID3D12Device* device)
             base[offset] |= bit;
             if (isSpoofed())
                 return;
-            base[offset] &= (uint8_t)~bit;
+            base[offset] &= (uint8_t) ~bit;
         }
 }
 
@@ -2250,7 +2251,6 @@ static void HookToDevice(ID3D12Device* InDevice)
 
     if (InDevice == nullptr || o_CreateSampler != nullptr)
         return;
-
 
     LOG_DEBUG("Dx12");
 
