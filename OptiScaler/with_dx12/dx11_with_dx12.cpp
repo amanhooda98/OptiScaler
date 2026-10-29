@@ -4,6 +4,8 @@
 #include "with_dx12.h"
 
 #include <atomic>
+#include <mutex>
+#include <set>
 
 #include <State.h>
 #include <Util.h>
@@ -41,6 +43,80 @@ Dx11WithDx12::D3D11_TEXTURE2D_DESC_C CaptureDesc(const D3D11_TEXTURE2D_DESC& des
     Dx11WithDx12::D3D11_TEXTURE2D_DESC_C result = {};
     ASSIGN_DESC(result, desc);
     return result;
+}
+
+namespace
+{
+    struct NTSharedTextureKey
+    {
+        UINT Width = 0;
+        UINT Height = 0;
+        UINT MipLevels = 0;
+        UINT ArraySize = 0;
+        DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+        UINT BindFlags = 0;
+        D3D11_USAGE Usage = D3D11_USAGE_DEFAULT;
+        UINT CPUAccessFlags = 0;
+        UINT MiscFlags = 0;
+        UINT SampleCount = 1;
+        UINT SampleQuality = 0;
+
+        bool operator<(const NTSharedTextureKey& other) const
+        {
+            if (Width != other.Width) return Width < other.Width;
+            if (Height != other.Height) return Height < other.Height;
+            if (MipLevels != other.MipLevels) return MipLevels < other.MipLevels;
+            if (ArraySize != other.ArraySize) return ArraySize < other.ArraySize;
+            if (Format != other.Format) return Format < other.Format;
+            if (BindFlags != other.BindFlags) return BindFlags < other.BindFlags;
+            if (Usage != other.Usage) return Usage < other.Usage;
+            if (CPUAccessFlags != other.CPUAccessFlags) return CPUAccessFlags < other.CPUAccessFlags;
+            if (MiscFlags != other.MiscFlags) return MiscFlags < other.MiscFlags;
+            if (SampleCount != other.SampleCount) return SampleCount < other.SampleCount;
+            return SampleQuality < other.SampleQuality;
+        }
+    };
+
+    NTSharedTextureKey NTKeyFromDesc(const D3D11_TEXTURE2D_DESC& desc)
+    {
+        NTSharedTextureKey key;
+        key.Width = desc.Width;
+        key.Height = desc.Height;
+        key.MipLevels = desc.MipLevels;
+        key.ArraySize = desc.ArraySize;
+        key.Format = desc.Format;
+        key.BindFlags = desc.BindFlags;
+        key.Usage = desc.Usage;
+        key.CPUAccessFlags = desc.CPUAccessFlags;
+        key.MiscFlags = desc.MiscFlags;
+        key.SampleCount = desc.SampleDesc.Count;
+        key.SampleQuality = desc.SampleDesc.Quality;
+        return key;
+    }
+
+    std::set<NTSharedTextureKey>& FailedNTSharedKeys()
+    {
+        static std::set<NTSharedTextureKey> keys;
+        return keys;
+    }
+
+    std::mutex& FailedNTSharedMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    bool NTSharedAttemptPreviouslyFailed(const D3D11_TEXTURE2D_DESC& desc)
+    {
+        std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
+        return FailedNTSharedKeys().find(NTKeyFromDesc(desc)) != FailedNTSharedKeys().end();
+    }
+
+    void MarkNTSharedAttemptFailed(const D3D11_TEXTURE2D_DESC& desc)
+    {
+        std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
+        FailedNTSharedKeys().insert(NTKeyFromDesc(desc));
+    }
 }
 
 // Frame ids are shared by all caches and never reset, so a stale id can't match a newer frame
@@ -473,6 +549,13 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
                                           OutResource->LastPreparedDepth == InDepth &&
                                           (OutResource->Desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE) != 0;
 
+        if (NTSharedAttemptPreviouslyFailed(sharedDesc))
+        {
+            ReleaseSharedResource(OutResource);
+            originalTexture->Release();
+            return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
+        }
+
         if (!sharedTextureMatches)
         {
             ReleaseSharedResource(OutResource);
@@ -482,6 +565,7 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || OutResource->SharedTexture == nullptr)
             {
+                MarkNTSharedAttemptFailed(sharedDesc);
                 LOG_WARN("NT shared CreateTexture2D failed (0x{0:x}) for {1}x{2} fmt {3} usage {4} bind {5:x} misc {6:x} mips {7} "
                          "array {8} samples {9}, falling back to a legacy shared handle",
                          result, sharedDesc.Width, sharedDesc.Height, (int) sharedDesc.Format, (int) sharedDesc.Usage,
@@ -500,6 +584,7 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || resource == nullptr)
             {
+                MarkNTSharedAttemptFailed(sharedDesc);
                 LOG_WARN("QueryInterface(IDXGIResource1) failed (0x{0:x}), falling back to a legacy shared handle",
                          result);
                 ReleaseSharedResource(OutResource);
@@ -517,6 +602,7 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || OutResource->Dx11Handle == NULL)
             {
+                MarkNTSharedAttemptFailed(sharedDesc);
                 LOG_WARN("CreateSharedHandle failed (0x{0:x}), falling back to a legacy shared handle", result);
                 ReleaseSharedResource(OutResource);
                 originalTexture->Release();
