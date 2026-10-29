@@ -714,7 +714,7 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
     // and other usages can never be tagged, so logging them merely exhausts the budget before real inputs.
     if (!shareable && pDesc->Usage == D3D11_USAGE_DEFAULT && pDesc->Width >= 256 && pDesc->Height >= 256)
     {
-        static std::atomic<int> createDiagnosticBudget { 24 };
+        static std::atomic<int> createDiagnosticBudget { 1024 };
         static std::atomic<bool> createDiagnosticDone { false };
         if (!createDiagnosticDone.load(std::memory_order_relaxed))
         {
