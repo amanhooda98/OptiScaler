@@ -562,6 +562,10 @@ class Config
     // Prefer NT handles: they let typeless depth be shared as-is instead of running a full-resolution depth
     // conversion compute pass every frame. CopyTextureFrom11To12 falls back to a legacy handle if NT sharing fails.
     CustomOptional<bool, SoftDefault> DontUseNTShared { false };
+    // Create the game's upscaler input textures (colour, motion vectors, depth) as shareable, so the Dx12 side can
+    // open the game's own allocation. That removes the full-resolution D3D11 -> shared texture copy that
+    // Dx11WithDx12 otherwise runs for every input on every frame.
+    CustomOptional<bool, SoftDefault> ShareGameTextures { true };
 
     // vulkanwdx12
     CustomOptional<bool> VulkanUseCopyForInputs { false };

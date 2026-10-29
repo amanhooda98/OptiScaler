@@ -25,16 +25,22 @@ bool _skipDx11Create = false;
 // DirectX
 using PFN_CreateSamplerState = rewrite_signature<decltype(&ID3D11Device::CreateSamplerState)>::type;
 
+using PFN_CreateTexture2D = rewrite_signature<decltype(&ID3D11Device::CreateTexture2D)>::type;
+
 using PFN_Release = rewrite_signature<decltype(&IUnknown::Release)>::type;
 
 static PFN_D3D11_CREATE_DEVICE o_D3D11CreateDevice = nullptr;
 static PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN o_D3D11CreateDeviceAndSwapChain = nullptr;
 static PFN_CreateSamplerState o_CreateSamplerState = nullptr;
+static PFN_CreateTexture2D o_CreateTexture2D = nullptr;
 static PFN_D3D11ON12_CREATE_DEVICE o_D3D11On12CreateDevice = nullptr;
 static PFN_Release o_D3D11DeviceRelease = nullptr;
 
 static HRESULT hkCreateSamplerState(ID3D11Device* This, const D3D11_SAMPLER_DESC* pSamplerDesc,
                                     ID3D11SamplerState** ppSamplerState);
+
+static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC* pDesc,
+                                 const D3D11_SUBRESOURCE_DATA* pInitialData, ID3D11Texture2D** ppTexture);
 
 VALIDATE_HOOK(hkD3D11DeviceRelease, PFN_Release)
 static ULONG hkD3D11DeviceRelease(IUnknown* device)
@@ -103,6 +109,7 @@ static void HookToDeviceLocal(ID3D11Device* InDevice)
 
     o_D3D11DeviceRelease = (PFN_Release) pVTable[2];
     o_CreateSamplerState = (PFN_CreateSamplerState) pVTable[23];
+    o_CreateTexture2D = (PFN_CreateTexture2D) pVTable[5];
 
     // Apply the detour
     if (o_CreateSamplerState != nullptr || o_D3D11DeviceRelease != nullptr)
@@ -116,12 +123,16 @@ static void HookToDeviceLocal(ID3D11Device* InDevice)
         if (o_CreateSamplerState != nullptr)
             DetourAttach(&(PVOID&) o_CreateSamplerState, hkCreateSamplerState);
 
+        if (o_CreateTexture2D != nullptr)
+            DetourAttach(&(PVOID&) o_CreateTexture2D, hkCreateTexture2D);
+
         auto detourResult = DetourTransactionCommit();
         if (detourResult != NO_ERROR)
         {
             LOG_ERROR("Failed to hook ID3D11Device: {:X}", detourResult);
             o_CreateSamplerState = nullptr;
             o_D3D11DeviceRelease = nullptr;
+            o_CreateTexture2D = nullptr;
         }
     }
 }
@@ -525,6 +536,101 @@ static HRESULT hkCreateSamplerState(ID3D11Device* This, const D3D11_SAMPLER_DESC
     return o_CreateSamplerState(This, &newDesc, ppSamplerState);
 }
 
+// The Dx11 -> Dx12 layer has to copy a game texture into an OptiScaler owned shared texture whenever the game did not
+// create that texture as shareable, and it has to do so for colour, motion vectors and depth on every single frame.
+// Tagging the likely upscaler inputs with D3D11_RESOURCE_MISC_SHARED_NTHANDLE at creation lets the Dx12 device open
+// the game's own allocation instead (Dx11WithDx12::CopyTextureFrom11To12 takes its "source is already shared" path),
+// which removes those per-frame full resolution copies.
+static bool IsTypelessFormatForSharing(DXGI_FORMAT format)
+{
+    switch (format)
+    {
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
+{
+    if (desc.Usage != D3D11_USAGE_DEFAULT || desc.CPUAccessFlags != 0)
+        return false;
+
+    // Upscaler inputs are single 2D slices, anything that already carries misc flags keeps its own semantics
+    if (desc.MipLevels != 1 || desc.ArraySize != 1 || desc.SampleDesc.Count != 1 || desc.MiscFlags != 0)
+        return false;
+
+    if (desc.Width < 256 || desc.Height < 256)
+        return false;
+
+    const UINT allowedBind = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL |
+                             D3D11_BIND_UNORDERED_ACCESS;
+
+    if (desc.BindFlags == 0 || (desc.BindFlags & ~allowedBind) != 0)
+        return false;
+
+    // D3D11 only shares depth buffers that are typeless
+    if ((desc.BindFlags & D3D11_BIND_DEPTH_STENCIL) != 0 && !IsTypelessFormatForSharing(desc.Format))
+        return false;
+
+    switch (desc.Format)
+    {
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+VALIDATE_HOOK(hkCreateTexture2D, PFN_CreateTexture2D)
+static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC* pDesc,
+                                 const D3D11_SUBRESOURCE_DATA* pInitialData, ID3D11Texture2D** ppTexture)
+{
+    if (pDesc == nullptr || This == nullptr || o_CreateTexture2D == nullptr)
+        return E_INVALIDARG;
+
+    if (!Config::Instance()->ShareGameTextures.value_or_default() || !IsShareableUpscalerInput(*pDesc))
+        return o_CreateTexture2D(This, pDesc, pInitialData, ppTexture);
+
+    D3D11_TEXTURE2D_DESC sharedDesc = *pDesc;
+    sharedDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+
+    if (auto result = o_CreateTexture2D(This, &sharedDesc, pInitialData, ppTexture); SUCCEEDED(result))
+        return result;
+
+    // The driver rejected the flag for this description, fall back to exactly what the game asked for
+    if (ppTexture != nullptr)
+        *ppTexture = nullptr;
+
+    return o_CreateTexture2D(This, pDesc, pInitialData, ppTexture);
+}
+
 void D3D11Hooks::HookToDevice(ID3D11Device* InDevice) { HookToDeviceLocal(InDevice); }
 
 void D3D11Hooks::Hook(HMODULE dx11Module)
@@ -590,6 +696,9 @@ void D3D11Hooks::Unhook()
     if (o_CreateSamplerState != nullptr)
         DetourDetach(&(PVOID&) o_CreateSamplerState, hkCreateSamplerState);
 
+    if (o_CreateTexture2D != nullptr)
+        DetourDetach(&(PVOID&) o_CreateTexture2D, hkCreateTexture2D);
+
     auto detourResult = DetourTransactionCommit();
     if (detourResult != NO_ERROR)
     {
@@ -600,6 +709,7 @@ void D3D11Hooks::Unhook()
         o_D3D11CreateDevice = nullptr;
         o_CreateSamplerState = nullptr;
         o_D3D11DeviceRelease = nullptr;
+        o_CreateTexture2D = nullptr;
         o_D3D11On12CreateDevice = nullptr;
         o_D3D11CreateDeviceAndSwapChain = nullptr;
     }

@@ -354,16 +354,10 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     const bool hasRestoreParamReactive = getOriginalNgxResource(
         InParameters, NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, &restoreParamReactive);
 
-    ComPtr<ID3D11RenderTargetView> rawRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-    ComPtr<ID3D11DepthStencilView> restoreDSV = nullptr;
-    InDeviceContext->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
-                                        reinterpret_cast<ID3D11RenderTargetView**>(rawRTVs), restoreDSV.GetAddressOf());
-
-    ID3D11RenderTargetView* nullRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-    for (UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)
-        nullRTVs[i] = nullptr;
-    InDeviceContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, nullRTVs, nullptr);
-
+    // The upscaler runs on D3D12, so the D3D11 output merger state is irrelevant here. Unbinding and restoring the
+    // game's render targets used to cost one OMGetRenderTargets plus two OMSetRenderTargets per frame, each of which
+    // splits the game's render pass. Nothing in this path renders through D3D11, and the input copy (if any) reads a
+    // bound render target without a hazard, so the state is left exactly as the game set it.
     bool dx12EvalResult = false;
     bool commandListRecording = false;
     bool commandListExecuted = false;
@@ -466,13 +460,6 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
         _frameCount++;
     else
         Dx11WithDx12::ClearLastPreparedUpscalerFrameState(ResourceCache);
-
-    // Restore the original color/render targets. The D3D12 execution path does not use the D3D11 compute/sampler
-    // binding state, so leave those untouched.
-    ID3D11RenderTargetView* restoreRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-    for (UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)
-        restoreRTVs[i] = rawRTVs[i].Get();
-    InDeviceContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, restoreRTVs, restoreDSV.Get());
 
     return evalResult;
 }
