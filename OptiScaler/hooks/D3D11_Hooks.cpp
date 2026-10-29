@@ -576,17 +576,53 @@ void D3D11Hooks::SetUpscalerTextureSizes(uint32_t renderWidth, uint32_t renderHe
     sharedScopeDisplayHeight.store(displayHeight, std::memory_order_relaxed);
 }
 
-static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
+static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc, const char** outReason = nullptr)
 {
-    if (desc.Usage != D3D11_USAGE_DEFAULT || desc.CPUAccessFlags != 0)
+    if (desc.Usage != D3D11_USAGE_DEFAULT)
+    {
+        if (outReason != nullptr)
+            *outReason = "usage not DEFAULT";
         return false;
+    }
+    if (desc.CPUAccessFlags != 0)
+    {
+        if (outReason != nullptr)
+            *outReason = "CPU access flags set";
+        return false;
+    }
 
     // Upscaler inputs are single 2D slices, anything that already carries misc flags keeps its own semantics
-    if (desc.MipLevels != 1 || desc.ArraySize != 1 || desc.SampleDesc.Count != 1 || desc.MiscFlags != 0)
+    if (desc.MipLevels != 1)
+    {
+        if (outReason != nullptr)
+            *outReason = "mip levels not single";
         return false;
+    }
+    if (desc.ArraySize != 1)
+    {
+        if (outReason != nullptr)
+            *outReason = "array size not single";
+        return false;
+    }
+    if (desc.SampleDesc.Count != 1)
+    {
+        if (outReason != nullptr)
+            *outReason = "sample count not 1";
+        return false;
+    }
+    if (desc.MiscFlags != 0)
+    {
+        if (outReason != nullptr)
+            *outReason = "misc flags set";
+        return false;
+    }
 
     if (desc.Width < 256 || desc.Height < 256)
+    {
+        if (outReason != nullptr)
+            *outReason = "below 256x256";
         return false;
+    }
 
     // Optional scope: only tag the buffers the upscaler can actually read or write. Colour, motion vectors and
     // depth are at the render size, half-rate motion vectors at half of it, and the output at the display size.
@@ -604,7 +640,11 @@ static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
             const bool atHalfRenderSize = desc.Width * 2 == renderWidth && desc.Height * 2 == renderHeight;
 
             if (!atRenderSize && !atDisplaySize && !atHalfRenderSize)
+            {
+                if (outReason != nullptr)
+                    *outReason = "not render/display/half render size";
                 return false;
+            }
         }
     }
 
@@ -612,11 +652,19 @@ static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
                              D3D11_BIND_UNORDERED_ACCESS;
 
     if (desc.BindFlags == 0 || (desc.BindFlags & ~allowedBind) != 0)
+    {
+        if (outReason != nullptr)
+            *outReason = "bind flags outside allowed set";
         return false;
+    }
 
     // D3D11 only shares depth buffers that are typeless
     if ((desc.BindFlags & D3D11_BIND_DEPTH_STENCIL) != 0 && !IsTypelessFormatForSharing(desc.Format))
+    {
+        if (outReason != nullptr)
+            *outReason = "depth bind requires typeless format";
         return false;
+    }
 
     switch (desc.Format)
     {
@@ -642,6 +690,8 @@ static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
         case DXGI_FORMAT_R32G8X24_TYPELESS:
             return true;
         default:
+            if (outReason != nullptr)
+                *outReason = "format not in allowlist";
             return false;
     }
 }
@@ -654,10 +704,12 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
         return E_INVALIDARG;
 
     const bool shareRequested = Config::Instance()->ShareGameTextures.value_or_default();
-    const bool shareable = shareRequested && IsShareableUpscalerInput(*pDesc);
+    const char* rejectReason = nullptr;
+    const bool shareable = shareRequested && IsShareableUpscalerInput(*pDesc, &rejectReason);
 
     // Bounded diagnostic: a full-resolution texture the filter refuses is exactly what turns into a per-frame
-    // copy on the Dx12 side, so print the descriptors that decided it.
+    // copy on the Dx12 side, so print the descriptors that decided it, together with the filter check that
+    // refused it instead of making the reader infer it from the attributes.
     if (!shareable && pDesc->Width >= 256 && pDesc->Height >= 256)
     {
         static std::atomic<int> createDiagnosticBudget { 24 };
@@ -671,7 +723,9 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
                          "samples {8} cpu {9}: sharing {10}",
                          pDesc->Width, pDesc->Height, (int) pDesc->Format, (int) pDesc->Usage, pDesc->BindFlags,
                          pDesc->MiscFlags, pDesc->MipLevels, pDesc->ArraySize, pDesc->SampleDesc.Count,
-                         pDesc->CPUAccessFlags, shareRequested ? "requested but filter refused" : "disabled");
+                         pDesc->CPUAccessFlags,
+                         shareRequested ? (rejectReason != nullptr ? rejectReason : "requested but filter refused")
+                                       : "disabled");
         }
     }
 
