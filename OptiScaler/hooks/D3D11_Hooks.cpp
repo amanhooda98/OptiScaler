@@ -710,7 +710,9 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
     // Bounded diagnostic: a full-resolution texture the filter refuses is exactly what turns into a per-frame
     // copy on the Dx12 side, so print the descriptors that decided it, together with the filter check that
     // refused it instead of making the reader infer it from the attributes.
-    if (!shareable && pDesc->Width >= 256 && pDesc->Height >= 256)
+    // Only spend the diagnostic budget on textures that could actually be shared (DEFAULT usage). IMMUTABLE
+    // and other usages can never be tagged, so logging them merely exhausts the budget before real inputs.
+    if (!shareable && pDesc->Usage == D3D11_USAGE_DEFAULT && pDesc->Width >= 256 && pDesc->Height >= 256)
     {
         static std::atomic<int> createDiagnosticBudget { 24 };
         static std::atomic<bool> createDiagnosticDone { false };
