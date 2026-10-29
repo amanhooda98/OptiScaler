@@ -547,16 +547,16 @@ static bool IsTypelessFormatForSharing(DXGI_FORMAT format)
 {
     switch (format)
     {
-        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
-        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
-        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
-        case DXGI_FORMAT_R16G16_TYPELESS:
-        case DXGI_FORMAT_R32_TYPELESS:
-        case DXGI_FORMAT_R24G8_TYPELESS:
-        case DXGI_FORMAT_R32G8X24_TYPELESS:
-            return true;
-        default:
-            return false;
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+    case DXGI_FORMAT_R16G16_TYPELESS:
+    case DXGI_FORMAT_R32_TYPELESS:
+    case DXGI_FORMAT_R24G8_TYPELESS:
+    case DXGI_FORMAT_R32G8X24_TYPELESS:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -576,51 +576,37 @@ void D3D11Hooks::SetUpscalerTextureSizes(uint32_t renderWidth, uint32_t renderHe
     sharedScopeDisplayHeight.store(displayHeight, std::memory_order_relaxed);
 }
 
-static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc, const char** outReason = nullptr)
+static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
 {
     if (desc.Usage != D3D11_USAGE_DEFAULT)
     {
-        if (outReason != nullptr)
-            *outReason = "usage not DEFAULT";
         return false;
     }
     if (desc.CPUAccessFlags != 0)
     {
-        if (outReason != nullptr)
-            *outReason = "CPU access flags set";
         return false;
     }
 
     // Upscaler inputs are single 2D slices, anything that already carries misc flags keeps its own semantics
     if (desc.MipLevels != 1)
     {
-        if (outReason != nullptr)
-            *outReason = "mip levels not single";
         return false;
     }
     if (desc.ArraySize != 1)
     {
-        if (outReason != nullptr)
-            *outReason = "array size not single";
         return false;
     }
     if (desc.SampleDesc.Count != 1)
     {
-        if (outReason != nullptr)
-            *outReason = "sample count not 1";
         return false;
     }
     if (desc.MiscFlags != 0)
     {
-        if (outReason != nullptr)
-            *outReason = "misc flags set";
         return false;
     }
 
     if (desc.Width < 256 || desc.Height < 256)
     {
-        if (outReason != nullptr)
-            *outReason = "below 256x256";
         return false;
     }
 
@@ -641,58 +627,50 @@ static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc, const cha
 
             if (!atRenderSize && !atDisplaySize && !atHalfRenderSize)
             {
-                if (outReason != nullptr)
-                    *outReason = "not render/display/half render size";
                 return false;
             }
         }
     }
 
-    const UINT allowedBind = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL |
-                             D3D11_BIND_UNORDERED_ACCESS;
+    const UINT allowedBind =
+        D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_UNORDERED_ACCESS;
 
     if (desc.BindFlags == 0 || (desc.BindFlags & ~allowedBind) != 0)
     {
-        if (outReason != nullptr)
-            *outReason = "bind flags outside allowed set";
         return false;
     }
 
     // D3D11 only shares depth buffers that are typeless
     if ((desc.BindFlags & D3D11_BIND_DEPTH_STENCIL) != 0 && !IsTypelessFormatForSharing(desc.Format))
     {
-        if (outReason != nullptr)
-            *outReason = "depth bind requires typeless format";
         return false;
     }
 
     switch (desc.Format)
     {
-        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
-        case DXGI_FORMAT_R8G8B8A8_UNORM:
-        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-        case DXGI_FORMAT_B8G8R8A8_UNORM:
-        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-        case DXGI_FORMAT_B8G8R8X8_UNORM:
-        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
-        case DXGI_FORMAT_R10G10B10A2_UNORM:
-        case DXGI_FORMAT_R11G11B10_FLOAT:
-        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
-        case DXGI_FORMAT_R16G16B16A16_FLOAT:
-        case DXGI_FORMAT_R16G16B16A16_UNORM:
-        case DXGI_FORMAT_R16G16_TYPELESS:
-        case DXGI_FORMAT_R16G16_FLOAT:
-        case DXGI_FORMAT_R16G16_UNORM:
-        case DXGI_FORMAT_R32_TYPELESS:
-        case DXGI_FORMAT_R32_FLOAT:
-        case DXGI_FORMAT_R32_UINT:
-        case DXGI_FORMAT_R24G8_TYPELESS:
-        case DXGI_FORMAT_R32G8X24_TYPELESS:
-            return true;
-        default:
-            if (outReason != nullptr)
-                *outReason = "format not in allowlist";
-            return false;
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+    case DXGI_FORMAT_R11G11B10_FLOAT:
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+    case DXGI_FORMAT_R16G16B16A16_UNORM:
+    case DXGI_FORMAT_R16G16_TYPELESS:
+    case DXGI_FORMAT_R16G16_FLOAT:
+    case DXGI_FORMAT_R16G16_UNORM:
+    case DXGI_FORMAT_R32_TYPELESS:
+    case DXGI_FORMAT_R32_FLOAT:
+    case DXGI_FORMAT_R32_UINT:
+    case DXGI_FORMAT_R24G8_TYPELESS:
+    case DXGI_FORMAT_R32G8X24_TYPELESS:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -704,32 +682,7 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
         return E_INVALIDARG;
 
     const bool shareRequested = Config::Instance()->ShareGameTextures.value_or_default();
-    const char* rejectReason = nullptr;
-    const bool shareable = shareRequested && IsShareableUpscalerInput(*pDesc, &rejectReason);
-
-    // Bounded diagnostic: a full-resolution texture the filter refuses is exactly what turns into a per-frame
-    // copy on the Dx12 side, so print the descriptors that decided it, together with the filter check that
-    // refused it instead of making the reader infer it from the attributes.
-    // Only spend the diagnostic budget on textures that could actually be shared (DEFAULT usage). IMMUTABLE
-    // and other usages can never be tagged, so logging them merely exhausts the budget before real inputs.
-    if (!shareable && pDesc->Usage == D3D11_USAGE_DEFAULT && pDesc->Width >= 256 && pDesc->Height >= 256)
-    {
-        static std::atomic<int> createDiagnosticBudget { 1024 };
-        static std::atomic<bool> createDiagnosticDone { false };
-        if (!createDiagnosticDone.load(std::memory_order_relaxed))
-        {
-            if (createDiagnosticBudget.fetch_sub(1, std::memory_order_relaxed) <= 0)
-                createDiagnosticDone.store(true, std::memory_order_relaxed);
-            else
-                LOG_INFO("Dx11wDx12 create {0}x{1} fmt {2} usage {3} bind {4:x} misc {5:x} mips {6} array {7} "
-                         "samples {8} cpu {9}: sharing {10}",
-                         pDesc->Width, pDesc->Height, (int) pDesc->Format, (int) pDesc->Usage, pDesc->BindFlags,
-                         pDesc->MiscFlags, pDesc->MipLevels, pDesc->ArraySize, pDesc->SampleDesc.Count,
-                         pDesc->CPUAccessFlags,
-                         shareRequested ? (rejectReason != nullptr ? rejectReason : "requested but filter refused")
-                                       : "disabled");
-        }
-    }
+    const bool shareable = shareRequested && IsShareableUpscalerInput(*pDesc);
 
     if (!shareable)
         return o_CreateTexture2D(This, pDesc, pInitialData, ppTexture);

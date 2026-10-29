@@ -47,77 +47,87 @@ Dx11WithDx12::D3D11_TEXTURE2D_DESC_C CaptureDesc(const D3D11_TEXTURE2D_DESC& des
 
 namespace
 {
-    struct NTSharedTextureKey
-    {
-        UINT Width = 0;
-        UINT Height = 0;
-        UINT MipLevels = 0;
-        UINT ArraySize = 0;
-        DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
-        UINT BindFlags = 0;
-        D3D11_USAGE Usage = D3D11_USAGE_DEFAULT;
-        UINT CPUAccessFlags = 0;
-        UINT MiscFlags = 0;
-        UINT SampleCount = 1;
-        UINT SampleQuality = 0;
+struct NTSharedTextureKey
+{
+    UINT Width = 0;
+    UINT Height = 0;
+    UINT MipLevels = 0;
+    UINT ArraySize = 0;
+    DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+    UINT BindFlags = 0;
+    D3D11_USAGE Usage = D3D11_USAGE_DEFAULT;
+    UINT CPUAccessFlags = 0;
+    UINT MiscFlags = 0;
+    UINT SampleCount = 1;
+    UINT SampleQuality = 0;
 
-        bool operator<(const NTSharedTextureKey& other) const
-        {
-            if (Width != other.Width) return Width < other.Width;
-            if (Height != other.Height) return Height < other.Height;
-            if (MipLevels != other.MipLevels) return MipLevels < other.MipLevels;
-            if (ArraySize != other.ArraySize) return ArraySize < other.ArraySize;
-            if (Format != other.Format) return Format < other.Format;
-            if (BindFlags != other.BindFlags) return BindFlags < other.BindFlags;
-            if (Usage != other.Usage) return Usage < other.Usage;
-            if (CPUAccessFlags != other.CPUAccessFlags) return CPUAccessFlags < other.CPUAccessFlags;
-            if (MiscFlags != other.MiscFlags) return MiscFlags < other.MiscFlags;
-            if (SampleCount != other.SampleCount) return SampleCount < other.SampleCount;
-            return SampleQuality < other.SampleQuality;
-        }
-    };
-
-    NTSharedTextureKey NTKeyFromDesc(const D3D11_TEXTURE2D_DESC& desc)
+    bool operator<(const NTSharedTextureKey& other) const
     {
-        NTSharedTextureKey key;
-        key.Width = desc.Width;
-        key.Height = desc.Height;
-        key.MipLevels = desc.MipLevels;
-        key.ArraySize = desc.ArraySize;
-        key.Format = desc.Format;
-        key.BindFlags = desc.BindFlags;
-        key.Usage = desc.Usage;
-        key.CPUAccessFlags = desc.CPUAccessFlags;
-        key.MiscFlags = desc.MiscFlags;
-        key.SampleCount = desc.SampleDesc.Count;
-        key.SampleQuality = desc.SampleDesc.Quality;
-        return key;
+        if (Width != other.Width)
+            return Width < other.Width;
+        if (Height != other.Height)
+            return Height < other.Height;
+        if (MipLevels != other.MipLevels)
+            return MipLevels < other.MipLevels;
+        if (ArraySize != other.ArraySize)
+            return ArraySize < other.ArraySize;
+        if (Format != other.Format)
+            return Format < other.Format;
+        if (BindFlags != other.BindFlags)
+            return BindFlags < other.BindFlags;
+        if (Usage != other.Usage)
+            return Usage < other.Usage;
+        if (CPUAccessFlags != other.CPUAccessFlags)
+            return CPUAccessFlags < other.CPUAccessFlags;
+        if (MiscFlags != other.MiscFlags)
+            return MiscFlags < other.MiscFlags;
+        if (SampleCount != other.SampleCount)
+            return SampleCount < other.SampleCount;
+        return SampleQuality < other.SampleQuality;
     }
+};
 
-    std::set<NTSharedTextureKey>& FailedNTSharedKeys()
-    {
-        static std::set<NTSharedTextureKey> keys;
-        return keys;
-    }
-
-    std::mutex& FailedNTSharedMutex()
-    {
-        static std::mutex mutex;
-        return mutex;
-    }
-
-    bool NTSharedAttemptPreviouslyFailed(const D3D11_TEXTURE2D_DESC& desc)
-    {
-        std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
-        return FailedNTSharedKeys().find(NTKeyFromDesc(desc)) != FailedNTSharedKeys().end();
-    }
-
-    void MarkNTSharedAttemptFailed(const D3D11_TEXTURE2D_DESC& desc)
-    {
-        std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
-        FailedNTSharedKeys().insert(NTKeyFromDesc(desc));
-    }
+NTSharedTextureKey NTKeyFromDesc(const D3D11_TEXTURE2D_DESC& desc)
+{
+    NTSharedTextureKey key;
+    key.Width = desc.Width;
+    key.Height = desc.Height;
+    key.MipLevels = desc.MipLevels;
+    key.ArraySize = desc.ArraySize;
+    key.Format = desc.Format;
+    key.BindFlags = desc.BindFlags;
+    key.Usage = desc.Usage;
+    key.CPUAccessFlags = desc.CPUAccessFlags;
+    key.MiscFlags = desc.MiscFlags;
+    key.SampleCount = desc.SampleDesc.Count;
+    key.SampleQuality = desc.SampleDesc.Quality;
+    return key;
 }
+
+std::set<NTSharedTextureKey>& FailedNTSharedKeys()
+{
+    static std::set<NTSharedTextureKey> keys;
+    return keys;
+}
+
+std::mutex& FailedNTSharedMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+bool NTSharedAttemptPreviouslyFailed(const D3D11_TEXTURE2D_DESC& desc)
+{
+    std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
+    return FailedNTSharedKeys().find(NTKeyFromDesc(desc)) != FailedNTSharedKeys().end();
+}
+
+void MarkNTSharedAttemptFailed(const D3D11_TEXTURE2D_DESC& desc)
+{
+    std::lock_guard<std::mutex> lock(FailedNTSharedMutex());
+    FailedNTSharedKeys().insert(NTKeyFromDesc(desc));
+}
+} // namespace
 
 // Frame ids are shared by all caches and never reset, so a stale id can't match a newer frame
 UINT64 Dx11WithDx12::NextUpscalerFrameId() { return ++UpscalerLocalFrameId; }
@@ -520,21 +530,6 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
     const bool sourceHasLegacyShared = (sourceDesc.MiscFlags & D3D11_RESOURCE_MISC_SHARED) != 0;
     const bool sourceHasNTShared = (sourceDesc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE) != 0;
-
-    // Bounded one-time diagnostic: a source that already carries the NT-shared flag is opened in place by the
-    // Dx12 device, so it costs no per-frame copy. Anything else still goes through an OptiScaler owned texture.
-    static std::atomic<int> shareDiagnosticBudget { 24 };
-    static std::atomic<bool> shareDiagnosticDone { false };
-    if (!shareDiagnosticDone.load(std::memory_order_relaxed))
-    {
-        if (shareDiagnosticBudget.fetch_sub(1, std::memory_order_relaxed) <= 0)
-            shareDiagnosticDone.store(true, std::memory_order_relaxed);
-        else
-            LOG_INFO("Dx11wDx12 source {0}x{1} format {2}: NT shared {3}, legacy shared {4}, copy requested {5}",
-                     sourceDesc.Width, sourceDesc.Height, (int) sourceDesc.Format, sourceHasNTShared,
-                     sourceHasLegacyShared, InCopy);
-    }
-
     if (!sourceHasLegacyShared && !sourceHasNTShared && !InDontUseNTShared)
     {
         D3D11_TEXTURE2D_DESC sharedDesc = sourceDesc;
@@ -566,11 +561,6 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
             if (result != S_OK || OutResource->SharedTexture == nullptr)
             {
                 MarkNTSharedAttemptFailed(sharedDesc);
-                LOG_WARN("NT shared CreateTexture2D failed (0x{0:x}) for {1}x{2} fmt {3} usage {4} bind {5:x} misc {6:x} mips {7} "
-                         "array {8} samples {9}, falling back to a legacy shared handle",
-                         result, sharedDesc.Width, sharedDesc.Height, (int) sharedDesc.Format, (int) sharedDesc.Usage,
-                         sharedDesc.BindFlags, sharedDesc.MiscFlags, sharedDesc.MipLevels, sharedDesc.ArraySize,
-                         sharedDesc.SampleDesc.Count);
                 ReleaseSharedResource(OutResource);
                 originalTexture->Release();
                 return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
@@ -585,8 +575,6 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
             if (result != S_OK || resource == nullptr)
             {
                 MarkNTSharedAttemptFailed(sharedDesc);
-                LOG_WARN("QueryInterface(IDXGIResource1) failed (0x{0:x}), falling back to a legacy shared handle",
-                         result);
                 ReleaseSharedResource(OutResource);
                 originalTexture->Release();
                 return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
@@ -603,7 +591,6 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
             if (result != S_OK || OutResource->Dx11Handle == NULL)
             {
                 MarkNTSharedAttemptFailed(sharedDesc);
-                LOG_WARN("CreateSharedHandle failed (0x{0:x}), falling back to a legacy shared handle", result);
                 ReleaseSharedResource(OutResource);
                 originalTexture->Release();
                 return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
