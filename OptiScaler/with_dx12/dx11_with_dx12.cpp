@@ -482,7 +482,11 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || OutResource->SharedTexture == nullptr)
             {
-                LOG_WARN("NT shared CreateTexture2D failed (0x{0:x}), falling back to a legacy shared handle", result);
+                LOG_WARN("NT shared CreateTexture2D failed (0x{0:x}) for {1}x{2} fmt {3} usage {4} bind {5:x} misc {6:x} mips {7} "
+                         "array {8} samples {9}, falling back to a legacy shared handle",
+                         result, sharedDesc.Width, sharedDesc.Height, (int) sharedDesc.Format, (int) sharedDesc.Usage,
+                         sharedDesc.BindFlags, sharedDesc.MiscFlags, sharedDesc.MipLevels, sharedDesc.ArraySize,
+                         sharedDesc.SampleDesc.Count);
                 ReleaseSharedResource(OutResource);
                 originalTexture->Release();
                 return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
