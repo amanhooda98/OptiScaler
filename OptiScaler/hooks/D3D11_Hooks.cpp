@@ -734,13 +734,23 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
     if (!shareable)
         return o_CreateTexture2D(This, pDesc, pInitialData, ppTexture);
 
+    // Prefer NT handles (fast Dx12 open/no conversion). If the driver rejects them for this format (common on
+    // older GPUs), retry with a plain legacy shared handle so the game texture still arrives already shared.
     D3D11_TEXTURE2D_DESC sharedDesc = *pDesc;
-    sharedDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    sharedDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     if (auto result = o_CreateTexture2D(This, &sharedDesc, pInitialData, ppTexture); SUCCEEDED(result))
         return result;
 
-    // The driver rejected the flag for this description, fall back to exactly what the game asked for
+    if (ppTexture != nullptr)
+        *ppTexture = nullptr;
+
+    D3D11_TEXTURE2D_DESC legacyDesc = *pDesc;
+    legacyDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED;
+    if (auto result = o_CreateTexture2D(This, &legacyDesc, pInitialData, ppTexture); SUCCEEDED(result))
+        return result;
+
+    // Neither shared variant was accepted; recreate exactly what the game asked for so rendering still works.
     if (ppTexture != nullptr)
         *ppTexture = nullptr;
 
