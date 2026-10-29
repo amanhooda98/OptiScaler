@@ -559,7 +559,9 @@ class Config
 
     // dx11wdx12
     CustomOptional<bool> Dx11DelayedInit { false };
-    CustomOptional<bool, SoftDefault> DontUseNTShared { true };
+    // Prefer NT handles: they let typeless depth be shared as-is instead of running a full-resolution depth
+    // conversion compute pass every frame. CopyTextureFrom11To12 falls back to a legacy handle if NT sharing fails.
+    CustomOptional<bool, SoftDefault> DontUseNTShared { false };
 
     // vulkanwdx12
     CustomOptional<bool> VulkanUseCopyForInputs { false };

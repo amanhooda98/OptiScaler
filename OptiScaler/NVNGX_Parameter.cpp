@@ -368,13 +368,23 @@ std::vector<std::string> NVNGX_Parameters::enumerate() const
 template <typename T> void NVNGX_Parameters::setT(const char* key, T& value)
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
-    m_values[key] = value;
+    const std::string_view keyView(key);
+
+    auto k = m_values.find(keyView);
+
+    if (k != m_values.end())
+    {
+        (*k).second = value;
+        return;
+    }
+
+    m_values[std::string(keyView)] = value;
 }
 
 template <typename T> NVSDK_NGX_Result NVNGX_Parameters::getT(const char* key, T* value) const
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
-    auto k = m_values.find(key);
+    auto k = m_values.find(std::string_view(key));
 
     if (k == m_values.end())
     {

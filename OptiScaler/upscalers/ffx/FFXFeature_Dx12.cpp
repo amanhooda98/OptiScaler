@@ -75,7 +75,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
         params.sharpness = 0.01f;
     }
 
-    LOG_DEBUG("Jitter Offset: {0}x{1}", params.jitterOffset.x, params.jitterOffset.y);
+    LOG_TRACE("Jitter Offset: {0}x{1}", params.jitterOffset.x, params.jitterOffset.y);
 
     unsigned int reset;
     InParameters->Get(NVSDK_NGX_Parameter_Reset, &reset);
@@ -83,7 +83,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
     GetRenderResolution(InParameters, &params.renderSize.width, &params.renderSize.height);
 
-    LOG_DEBUG("Input Resolution: {0}x{1}", params.renderSize.width, params.renderSize.height);
+    LOG_TRACE("Input Resolution: {0}x{1}", params.renderSize.width, params.renderSize.height);
 
     params.commandList = InCommandList;
 
@@ -93,7 +93,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
     if (paramColor)
     {
-        LOG_DEBUG("Color exist..");
+        LOG_TRACE("Color exist..");
 
         if (Config::Instance()->ColorResourceBarrier.has_value())
         {
@@ -124,7 +124,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
     if (paramVelocity)
     {
-        LOG_DEBUG("MotionVectors exist..");
+        LOG_TRACE("MotionVectors exist..");
 
         if (Config::Instance()->MVResourceBarrier.has_value())
         {
@@ -155,7 +155,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
     if (paramOutput)
     {
-        LOG_DEBUG("Output exist..");
+        LOG_TRACE("Output exist..");
 
         if (Config::Instance()->OutputResourceBarrier.has_value())
             ResourceBarrier(InCommandList, paramOutput,
@@ -176,7 +176,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
     if (paramDepth)
     {
-        LOG_DEBUG("Depth exist..");
+        LOG_TRACE("Depth exist..");
 
         if (Config::Instance()->DepthResourceBarrier.has_value())
             ResourceBarrier(InCommandList, paramDepth,
@@ -196,7 +196,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
     ID3D12Resource* paramExp = nullptr;
     if (AutoExposure())
     {
-        LOG_DEBUG("AutoExposure enabled!");
+        LOG_TRACE("AutoExposure enabled!");
     }
     else
     {
@@ -205,7 +205,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
 
         if (paramExp)
         {
-            LOG_DEBUG("ExposureTexture exist..");
+            LOG_TRACE("ExposureTexture exist..");
 
             if (Config::Instance()->ExposureResourceBarrier.has_value())
                 ResourceBarrier(InCommandList, paramExp,
@@ -241,21 +241,21 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
     {
         if (paramTransparency != nullptr)
         {
-            LOG_DEBUG("Using FSR transparency mask..");
+            LOG_TRACE("Using FSR transparency mask..");
             params.transparencyAndComposition =
                 ffxApiGetResourceDX12(paramTransparency, FFX_API_RESOURCE_STATE_COMPUTE_READ);
         }
 
         if (paramReactiveMask != nullptr)
         {
-            LOG_DEBUG("Using FSR reactive mask..");
+            LOG_TRACE("Using FSR reactive mask..");
             params.reactive = ffxApiGetResourceDX12(paramReactiveMask, FFX_API_RESOURCE_STATE_COMPUTE_READ);
         }
         else
         {
             if (paramReactiveMask2 != nullptr)
             {
-                LOG_DEBUG("Input Bias mask exist..");
+                LOG_TRACE("Input Bias mask exist..");
                 Config::Instance()->DisableReactiveMask.set_volatile_value(false);
 
                 if (Config::Instance()->MaskResourceBarrier.has_value())
@@ -267,7 +267,13 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
                     params.transparencyAndComposition =
                         ffxApiGetResourceDX12(paramReactiveMask2, FFX_API_RESOURCE_STATE_COMPUTE_READ);
 
-                if (Config::Instance()->DlssReactiveMaskBias.value_or_default() > 0.0f && Bias->IsInit() &&
+                // FSR 4 already gets this mask through transparencyAndComposition above, so deriving a biased reactive
+                // copy with an extra full-resolution compute dispatch every frame is wasted GPU time there.
+                const bool maskAlreadyFedToFsr4 =
+                    Version().major >= 4 && params.transparencyAndComposition.resource != nullptr;
+
+                if (!maskAlreadyFedToFsr4 && Config::Instance()->DlssReactiveMaskBias.value_or_default() > 0.0f &&
+                    Bias->IsInit() &&
                     Bias->CreateBufferResource(Device, paramReactiveMask2, D3D12_RESOURCE_STATE_UNORDERED_ACCESS) &&
                     Bias->CanRender())
                 {
@@ -282,7 +288,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
                 }
                 else
                 {
-                    LOG_DEBUG("Skipping reactive mask, Bias: {0}, Bias Init: {1}, Bias CanRender: {2}",
+                    LOG_TRACE("Skipping reactive mask, Bias: {0}, Bias Init: {1}, Bias CanRender: {2}",
                               Config::Instance()->DlssReactiveMaskBias.value_or_default(), Bias->IsInit(),
                               Bias->CanRender());
                 }
@@ -319,7 +325,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
         LOG_WARN("Can't get motion vector scales!");
     }
 
-    LOG_DEBUG("Sharpness: {0}", params.sharpness);
+    LOG_TRACE("Sharpness: {0}", params.sharpness);
 
     if (!Config::Instance()->FsrUseFsrInputValues.value_or_default() ||
         InParameters->Get("FSR.cameraNear", &params.cameraNear) != NVSDK_NGX_Result_Success)
@@ -363,7 +369,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
             params.frameTimeDelta = (float) GetDeltaTime();
     }
 
-    LOG_DEBUG("FrameTimeDeltaInMsec: {0}", params.frameTimeDelta);
+    LOG_TRACE("FrameTimeDeltaInMsec: {0}", params.frameTimeDelta);
 
     if (!Config::Instance()->FsrUseFsrInputValues.value_or_default() ||
         InParameters->Get("FSR.viewSpaceToMetersFactor", &params.viewSpaceToMetersFactor) != NVSDK_NGX_Result_Success)
@@ -477,7 +483,7 @@ bool FFXFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList, 
         }
     }
 
-    LOG_DEBUG("Dispatch!!");
+    LOG_TRACE("Dispatch!!");
     auto result = FfxApiProxy::D3D12_Dispatch(&_context, &params.header);
 
     if (result != FFX_API_RETURN_OK)

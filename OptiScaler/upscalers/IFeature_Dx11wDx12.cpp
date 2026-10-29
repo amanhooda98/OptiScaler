@@ -118,7 +118,7 @@ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParame
     if (!AutoExposure())
         mask |= Dx11WithDx12::ResourceMask::Exposure;
     else
-        LOG_DEBUG("AutoExposure enabled!");
+        LOG_TRACE("AutoExposure enabled!");
 
     const bool reactiveDisabled = Config::Instance()->DisableReactiveMask.value_or(false);
     const bool reactiveRequired = Config::Instance()->Dx11Upscaler.value_or_default() == Upscaler::XeSS ||
@@ -127,11 +127,14 @@ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParame
     if (!reactiveDisabled)
         mask |= Dx11WithDx12::ResourceMask::Reactive;
     else
-        LOG_DEBUG("ReactiveMask disabled!");
+        LOG_TRACE("ReactiveMask disabled!");
+
+    // Linux keeps the conservative legacy sharing path, matching the CPU-wait special case in SyncDx12ToDx11.
+    const bool dontUseNTShared =
+        Config::Instance()->DontUseNTShared.value_or_default() || State::Instance().isRunningOnLinux;
 
     const auto prepareResult = Dx11WithDx12::PrepareUpscalerResources(
-        ResourceCache, InParameters, mask, (UINT) _frameCount, cacheFrameKey,
-        Config::Instance()->DontUseNTShared.value_or_default(), reactiveRequired, true);
+        ResourceCache, InParameters, mask, (UINT) _frameCount, cacheFrameKey, dontUseNTShared, reactiveRequired, true);
 
     if (!prepareResult.Success)
     {
@@ -212,7 +215,7 @@ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParame
         return false;
     }
 
-    LOG_DEBUG("Shared handles prepared and synchronized by Dx11WithDx12 cache, frameKey: {}", cacheFrameKey);
+    LOG_TRACE("Shared handles prepared and synchronized by Dx11WithDx12 cache, frameKey: {}", cacheFrameKey);
     return true;
 }
 

@@ -466,9 +466,10 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || OutResource->SharedTexture == nullptr)
             {
-                LOG_ERROR("CreateTexture2D error: {0:x}", result);
+                LOG_WARN("NT shared CreateTexture2D failed (0x{0:x}), falling back to a legacy shared handle", result);
+                ReleaseSharedResource(OutResource);
                 originalTexture->Release();
-                return false;
+                return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
             }
 
             OutResource->OwnsSharedTexture = true;
@@ -479,9 +480,11 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || resource == nullptr)
             {
-                LOG_ERROR("QueryInterface(resource) error: {0:x}", result);
+                LOG_WARN("QueryInterface(IDXGIResource1) failed (0x{0:x}), falling back to a legacy shared handle",
+                         result);
+                ReleaseSharedResource(OutResource);
                 originalTexture->Release();
-                return false;
+                return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
             }
 
             DWORD access = DXGI_SHARED_RESOURCE_READ;
@@ -494,16 +497,17 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
             if (result != S_OK || OutResource->Dx11Handle == NULL)
             {
-                LOG_ERROR("CreateSharedHandle error: {0:x}", result);
+                LOG_WARN("CreateSharedHandle failed (0x{0:x}), falling back to a legacy shared handle", result);
+                ReleaseSharedResource(OutResource);
                 originalTexture->Release();
-                return false;
+                return CopyTextureFrom11To12(InResource, OutResource, InCopy, InDepth, true);
             }
         }
 
         if (InCopy && OutResource->SharedTexture != nullptr)
             Dx11DeviceContext->CopyResource(OutResource->SharedTexture, InResource);
     }
-    else if (!sourceHasLegacyShared && InDontUseNTShared)
+    else if (!sourceHasLegacyShared && !sourceHasNTShared && InDontUseNTShared)
     {
         if (InDepth &&
             (sourceDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || sourceDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS))
@@ -1011,13 +1015,24 @@ Dx11WithDx12::PrepareUpscalerResources(D3D11_UPSCALER_RESOURCE_CACHE_C& cache, c
 
     if (CheckMask(mask, ResourceMask::Output))
     {
-        ID3D11Resource* paramOutput = nullptr;
-        if (GetNgxD3D11Resource(parameters, NVSDK_NGX_Parameter_Output, &paramOutput))
-            cache.ParamOutput[outputIndex] = paramOutput;
-
         missing = false;
-        ok &= PrepareCachedResource("Output", parameters, NVSDK_NGX_Parameter_Output, &cache.Output[outputIndex], false,
-                                    false, true, dontUseNTShared, frameId, Dx12Device, &missing);
+
+        // Resolve the NGX output once: the previous code did a second Get inside PrepareCachedResource for the same
+        // parameter, which is pure overhead on a hot path.
+        ID3D11Resource* paramOutput = nullptr;
+        if (!GetNgxD3D11Resource(parameters, NVSDK_NGX_Parameter_Output, &paramOutput))
+        {
+            missing = true;
+            LOG_ERROR("Output D3D11 resource is missing");
+            ok = false;
+        }
+        else
+        {
+            cache.ParamOutput[outputIndex] = paramOutput;
+            ok &= PrepareTextureFrom11To12("Output", Dx12Device, paramOutput, &cache.Output[outputIndex], false, false,
+                                           dontUseNTShared, frameId);
+        }
+
         result.MissingOutput = missing;
     }
 
@@ -1072,13 +1087,16 @@ bool Dx11WithDx12::CopyUpscalerOutputToDx11(D3D11_UPSCALER_RESOURCE_CACHE_C& cac
         return false;
     }
 
+    // Sync first: FSR may have written straight into the game's already shared output texture, in which case there is
+    // nothing left to blit (and a self-copy would be both wasteful and a hazard).
     if (!SyncDx12ToDx11())
     {
         LOG_ERROR("CopyUpscalerOutputToDx11 sync failed for frame {}", outputIndex);
         return false;
     }
 
-    Dx11DeviceContext->CopyResource(cache.ParamOutput[outputIndex], cache.Output[outputIndex].SharedTexture);
+    if (static_cast<ID3D11Resource*>(cache.Output[outputIndex].SharedTexture) != cache.ParamOutput[outputIndex])
+        Dx11DeviceContext->CopyResource(cache.ParamOutput[outputIndex], cache.Output[outputIndex].SharedTexture);
 
     // After a CPU wait the D3D11 queue is idle, submit right away instead of waiting for the next flush
     if (UseCpuWaitForDx12())

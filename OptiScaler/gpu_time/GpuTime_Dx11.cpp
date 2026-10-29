@@ -75,15 +75,20 @@ std::optional<double> GpuTime_Dx11::ReadGpuTime(ID3D11DeviceContext* context)
     {
         D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjointData;
 
-        if (context->GetData(_disjointQueries[readIndex], &disjointData, sizeof(disjointData), 0) == S_OK)
+        // DONOTFLUSH keeps the read asynchronous: a blocking GetData would flush the D3D11
+        // immediate context on every present just to feed the OSD timing overlay.
+        if (context->GetData(_disjointQueries[readIndex], &disjointData, sizeof(disjointData),
+                             D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK)
         {
             if (!disjointData.Disjoint && disjointData.Frequency > 0)
             {
                 UINT64 startTime = 0;
                 UINT64 endTime = 0;
 
-                if (context->GetData(_startQueries[readIndex], &startTime, sizeof(UINT64), 0) == S_OK &&
-                    context->GetData(_endQueries[readIndex], &endTime, sizeof(UINT64), 0) == S_OK)
+                if (context->GetData(_startQueries[readIndex], &startTime, sizeof(UINT64),
+                                     D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK &&
+                    context->GetData(_endQueries[readIndex], &endTime, sizeof(UINT64),
+                                     D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK)
                 {
                     if (endTime >= startTime)
                     {

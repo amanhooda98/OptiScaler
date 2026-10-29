@@ -1,5 +1,8 @@
 #pragma once
 
+#include <functional>
+#include <string_view>
+
 // Use real NVNGX params encapsulated in custom one
 // Which is not working correctly
 // #define ENABLE_ENCAPSULATED_PARAMS
@@ -186,6 +189,19 @@ struct Parameter
     size_t key = 0;
 };
 
+/// @brief Heterogeneous hasher that lets NGX parameter lookups hash a string_view directly, avoiding a temporary
+/// std::string allocation for every Get/Set on the per-frame Evaluate path.
+struct TransparentStringHash
+{
+    using is_transparent = void;
+    using is_avalanching = void;
+
+    uint64_t operator()(std::string_view value) const noexcept
+    {
+        return ankerl::unordered_dense::hash<std::string_view>{}(value);
+    }
+};
+
 /// @brief Implementation of the NVSDK_NGX_Parameter interface, providing thread-safe storage and retrieval of NGX
 /// parameters.
 struct NVNGX_Parameters : public NVSDK_NGX_Parameter
@@ -228,7 +244,7 @@ struct NVNGX_Parameters : public NVSDK_NGX_Parameter
     std::vector<std::string> enumerate() const;
 
   private:
-    ankerl::unordered_dense::map<std::string, Parameter> m_values;
+    ankerl::unordered_dense::map<std::string, Parameter, TransparentStringHash, std::equal_to<>> m_values;
     mutable std::mutex m_mutex;
 
     template <typename T> void setT(const char* key, T& value);
