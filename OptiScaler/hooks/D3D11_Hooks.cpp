@@ -653,7 +653,29 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
     if (pDesc == nullptr || This == nullptr || o_CreateTexture2D == nullptr)
         return E_INVALIDARG;
 
-    if (!Config::Instance()->ShareGameTextures.value_or_default() || !IsShareableUpscalerInput(*pDesc))
+    const bool shareRequested = Config::Instance()->ShareGameTextures.value_or_default();
+    const bool shareable = shareRequested && IsShareableUpscalerInput(*pDesc);
+
+    // Bounded diagnostic: a full-resolution texture the filter refuses is exactly what turns into a per-frame
+    // copy on the Dx12 side, so print the descriptors that decided it.
+    if (!shareable && pDesc->Width >= 256 && pDesc->Height >= 256)
+    {
+        static std::atomic<int> createDiagnosticBudget { 24 };
+        static std::atomic<bool> createDiagnosticDone { false };
+        if (!createDiagnosticDone.load(std::memory_order_relaxed))
+        {
+            if (createDiagnosticBudget.fetch_sub(1, std::memory_order_relaxed) <= 0)
+                createDiagnosticDone.store(true, std::memory_order_relaxed);
+            else
+                LOG_INFO("Dx11wDx12 create {0}x{1} fmt {2} usage {3} bind {4:x} misc {5:x} mips {6} array {7} "
+                         "samples {8} cpu {9}: sharing {10}",
+                         pDesc->Width, pDesc->Height, (int) pDesc->Format, (int) pDesc->Usage, pDesc->BindFlags,
+                         pDesc->MiscFlags, pDesc->MipLevels, pDesc->ArraySize, pDesc->SampleDesc.Count,
+                         pDesc->CPUAccessFlags, shareRequested ? "requested but filter refused" : "disabled");
+        }
+    }
+
+    if (!shareable)
         return o_CreateTexture2D(This, pDesc, pInitialData, ppTexture);
 
     D3D11_TEXTURE2D_DESC sharedDesc = *pDesc;
