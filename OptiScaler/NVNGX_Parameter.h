@@ -198,7 +198,7 @@ struct TransparentStringHash
 
     uint64_t operator()(std::string_view value) const noexcept
     {
-        return ankerl::unordered_dense::hash<std::string_view>{}(value);
+        return ankerl::unordered_dense::hash<std::string_view> {}(value);
     }
 };
 
