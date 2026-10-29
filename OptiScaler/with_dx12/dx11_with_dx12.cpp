@@ -3,6 +3,8 @@
 #include "dx11_with_dx12.h"
 #include "with_dx12.h"
 
+#include <atomic>
+
 #include <State.h>
 #include <Util.h>
 
@@ -442,6 +444,20 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
 
     const bool sourceHasLegacyShared = (sourceDesc.MiscFlags & D3D11_RESOURCE_MISC_SHARED) != 0;
     const bool sourceHasNTShared = (sourceDesc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE) != 0;
+
+    // Bounded one-time diagnostic: a source that already carries the NT-shared flag is opened in place by the
+    // Dx12 device, so it costs no per-frame copy. Anything else still goes through an OptiScaler owned texture.
+    static std::atomic<int> shareDiagnosticBudget { 24 };
+    static std::atomic<bool> shareDiagnosticDone { false };
+    if (!shareDiagnosticDone.load(std::memory_order_relaxed))
+    {
+        if (shareDiagnosticBudget.fetch_sub(1, std::memory_order_relaxed) <= 0)
+            shareDiagnosticDone.store(true, std::memory_order_relaxed);
+        else
+            LOG_INFO("Dx11wDx12 source {0}x{1} format {2}: NT shared {3}, legacy shared {4}, copy requested {5}",
+                     sourceDesc.Width, sourceDesc.Height, (int) sourceDesc.Format, sourceHasNTShared,
+                     sourceHasLegacyShared, InCopy);
+    }
 
     if (!sourceHasLegacyShared && !sourceHasNTShared && !InDontUseNTShared)
     {

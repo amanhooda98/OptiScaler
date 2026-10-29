@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "D3D11_Hooks.h"
 
+#include <atomic>
+
 #include <Util.h>
 #include <Config.h>
 
@@ -558,6 +560,22 @@ static bool IsTypelessFormatForSharing(DXGI_FORMAT format)
     }
 }
 
+// Published by the Dx11wDx12 feature once it knows its sizes. Zero means "not known yet", and the broad size
+// heuristic is kept until then so startup allocations are never silently skipped.
+static std::atomic<uint32_t> sharedScopeRenderWidth { 0 };
+static std::atomic<uint32_t> sharedScopeRenderHeight { 0 };
+static std::atomic<uint32_t> sharedScopeDisplayWidth { 0 };
+static std::atomic<uint32_t> sharedScopeDisplayHeight { 0 };
+
+void D3D11Hooks::SetUpscalerTextureSizes(uint32_t renderWidth, uint32_t renderHeight, uint32_t displayWidth,
+                                         uint32_t displayHeight)
+{
+    sharedScopeRenderWidth.store(renderWidth, std::memory_order_relaxed);
+    sharedScopeRenderHeight.store(renderHeight, std::memory_order_relaxed);
+    sharedScopeDisplayWidth.store(displayWidth, std::memory_order_relaxed);
+    sharedScopeDisplayHeight.store(displayHeight, std::memory_order_relaxed);
+}
+
 static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
 {
     if (desc.Usage != D3D11_USAGE_DEFAULT || desc.CPUAccessFlags != 0)
@@ -569,6 +587,26 @@ static bool IsShareableUpscalerInput(const D3D11_TEXTURE2D_DESC& desc)
 
     if (desc.Width < 256 || desc.Height < 256)
         return false;
+
+    // Optional scope: only tag the buffers the upscaler can actually read or write. Colour, motion vectors and
+    // depth are at the render size, half-rate motion vectors at half of it, and the output at the display size.
+    if (Config::Instance()->LimitSharedTexturesToUpscalerSize.value_or_default())
+    {
+        const auto renderWidth = sharedScopeRenderWidth.load(std::memory_order_relaxed);
+        const auto renderHeight = sharedScopeRenderHeight.load(std::memory_order_relaxed);
+        const auto displayWidth = sharedScopeDisplayWidth.load(std::memory_order_relaxed);
+        const auto displayHeight = sharedScopeDisplayHeight.load(std::memory_order_relaxed);
+
+        if (renderWidth != 0 && renderHeight != 0)
+        {
+            const bool atRenderSize = desc.Width == renderWidth && desc.Height == renderHeight;
+            const bool atDisplaySize = desc.Width == displayWidth && desc.Height == displayHeight;
+            const bool atHalfRenderSize = desc.Width * 2 == renderWidth && desc.Height * 2 == renderHeight;
+
+            if (!atRenderSize && !atDisplaySize && !atHalfRenderSize)
+                return false;
+        }
+    }
 
     const UINT allowedBind = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL |
                              D3D11_BIND_UNORDERED_ACCESS;

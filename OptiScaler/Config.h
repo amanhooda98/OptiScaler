@@ -566,6 +566,10 @@ class Config
     // open the game's own allocation. That removes the full-resolution D3D11 -> shared texture copy that
     // Dx11WithDx12 otherwise runs for every input on every frame.
     CustomOptional<bool, SoftDefault> ShareGameTextures { true };
+    // Restrict that tagging to buffers that match the upscaler's own render or display size. Without it every
+    // DEFAULT, single-sample, single-mip texture of 256x256 or more in a common format gets a shared allocation,
+    // which costs memory, can change how the driver lays the texture out, and slows creation during level loads.
+    CustomOptional<bool, SoftDefault> LimitSharedTexturesToUpscalerSize { false };
 
     // vulkanwdx12
     CustomOptional<bool> VulkanUseCopyForInputs { false };

@@ -10,6 +10,7 @@
 
 #include <with_dx12/with_dx12.h>
 #include <misc/DeferredRelease.h>
+#include <hooks/D3D11_Hooks.h>
 
 using Microsoft::WRL::ComPtr;
 
@@ -132,6 +133,10 @@ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParame
     // Linux keeps the conservative legacy sharing path, matching the CPU-wait special case in SyncDx12ToDx11.
     const bool dontUseNTShared =
         Config::Instance()->DontUseNTShared.value_or_default() || State::Instance().isRunningOnLinux;
+
+    // Keep the texture-sharing filter scoped to the buffers this upscaler actually uses. Only touches atomics.
+    if (Config::Instance()->LimitSharedTexturesToUpscalerSize.value_or_default())
+        D3D11Hooks::SetUpscalerTextureSizes(RenderWidth(), RenderHeight(), DisplayWidth(), DisplayHeight());
 
     const auto prepareResult = Dx11WithDx12::PrepareUpscalerResources(
         ResourceCache, InParameters, mask, (UINT) _frameCount, cacheFrameKey, dontUseNTShared, reactiveRequired, true);
