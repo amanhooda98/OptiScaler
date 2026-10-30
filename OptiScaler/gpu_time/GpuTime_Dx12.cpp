@@ -53,6 +53,12 @@ GpuTime_Dx12::~GpuTime_Dx12()
 
 void GpuTime_Dx12::Start(ID3D12GraphicsCommandList* cmdList)
 {
+    // Two EndQuery calls plus a ResolveQueryData are recorded into the upscaler's command list every frame purely to
+    // feed the OSD's "upscaler time" readout. Skip the whole thing while nothing on screen consumes it, which also
+    // keeps the readback buffer from being written each frame.
+    if (!State::Instance().osdGpuTimingWanted)
+        return;
+
     if (_init && _queryHeap != nullptr)
     {
         _currentFrameIndex = (_currentFrameIndex + 1) % QUERY_BUFFER_COUNT;
@@ -63,6 +69,9 @@ void GpuTime_Dx12::Start(ID3D12GraphicsCommandList* cmdList)
 
 void GpuTime_Dx12::End(ID3D12GraphicsCommandList* cmdList)
 {
+    if (!State::Instance().osdGpuTimingWanted)
+        return;
+
     if (_init && _queryHeap != nullptr)
     {
         cmdList->EndQuery(_queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, _currentFrameIndex * 2 + 1);

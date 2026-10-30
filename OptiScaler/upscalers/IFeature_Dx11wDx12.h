@@ -9,7 +9,14 @@
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
 
-#define DX11WDX12_COMMAND_BUFFER_COUNT 3
+// Number of reusable command allocator/command list pairs. The allocator a frame is recorded into cannot be Reset until
+// the GPU has finished the command list recorded from it, and that wait happens on the render thread. With 3 slots a
+// captured DCS session (build e7154540) showed the ring saturated on 12,530 of 12,530 frames, each costing a median
+// 4.1 ms (p95 5.6 ms) of render-thread stall, with the fence always exactly one behind the required value. The slots
+// are individually fenced in AcquireCommandFrame, so raising the count cannot corrupt an allocator; it only means the
+// CPU is no longer forced to wait when the D3D12 queue is a few frames behind. Depth stays bounded because
+// SyncDx12ToDx11 inserts a D3D11-side wait for the upscaled output in the same frame.
+#define DX11WDX12_COMMAND_BUFFER_COUNT 6
 
 class IFeature_Dx11wDx12 : public virtual IFeature_Dx11
 {
