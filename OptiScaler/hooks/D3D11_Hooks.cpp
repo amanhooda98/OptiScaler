@@ -6,8 +6,6 @@
 #include <Util.h>
 #include <Config.h>
 
-#include <with_dx12/with_dx12.h>
-
 #include <proxies/KernelBase_Proxy.h>
 
 #include <wrapped/wrapped_swapchain.h>
@@ -203,11 +201,6 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
                                    ID3D11Device** ppDevice, D3D_FEATURE_LEVEL* pFeatureLevel,
                                    ID3D11DeviceContext** ppImmediateContext)
 {
-    LOG_INFO("hkD3D 11CreateDevice entry adapter={:X} features={} ppDevice={:X} ppCtx={:X} quirk={}",
-             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)), FeatureLevels,
-             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppDevice)),
-             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppImmediateContext)),
-             static_cast<bool>(State::Instance().gameQuirks & GameQuirk::ForceD3D11On12));
     if (_skipDx11Create)
     {
         LOG_DEBUG("Skip");
@@ -278,63 +271,6 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
         }
     }
 
-    if (State::Instance().gameQuirks & GameQuirk::ForceD3D11On12 && o_D3D11On12CreateDevice != nullptr && ppDevice != nullptr)
-    {
-        D3D_FEATURE_LEVEL on12Level = (FeatureLevels > 0 && pFeatureLevels != nullptr) ? pFeatureLevels[0]
-                                                                                    : D3D_FEATURE_LEVEL_11_1;
-        ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
-        ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
-
-        if (dx12Device == nullptr)
-        {
-            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
-            LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
-                     static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
-        }
-
-        if (dx12Device != nullptr && dx12Queue == nullptr)
-        {
-            D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-            queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-            queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-            if (SUCCEEDED(dx12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&dx12Queue))))
-            {
-                LOG_INFO("D3D11On12 device experiment: created D3D12 command queue {}", (UINT64) dx12Queue);
-            }
-        }
-
-        if (dx12Device != nullptr && dx12Queue != nullptr && o_D3D11On12CreateDevice != nullptr)
-        {
-            if (State::Instance().currentD3D12Device == nullptr || State::Instance().currentCommandQueue == nullptr)
-                WithDx12::SetD3D12Objects(dx12Device, dx12Queue, D3D12_COMMAND_LIST_TYPE_DIRECT);
-
-            ID3D11Device* on12Device = nullptr;
-            ID3D11DeviceContext* on12Context = nullptr;
-            D3D_FEATURE_LEVEL chosenLevel = on12Level;
-            HRESULT result = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels, reinterpret_cast<IUnknown* const*>(&dx12Queue), 1, 0,
-                                                   &on12Device, &on12Context, &chosenLevel);
-
-            if (result == S_OK && on12Device != nullptr)
-            {
-                if (pFeatureLevel != nullptr)
-                    *pFeatureLevel = chosenLevel;
-                if (ppDevice != nullptr)
-                    *ppDevice = on12Device;
-                if (ppImmediateContext != nullptr)
-                    *ppImmediateContext = on12Context;
-
-                State::Instance().d3d11Devices.push_back(on12Device);
-                HookToDeviceLocal(on12Device);
-
-                LOG_INFO("ForceD3D11On12: created MS-backed D3D11 device {:X}; D3D12 queue {:X}", (UINT64) on12Device,
-                         (UINT64) dx12Queue);
-                return result;
-            }
-
-            LOG_ERROR("ForceD3D11On 12: D3D11On12CreateDevice failed {:X}; using native D3D11 fallback", (UINT) result);
-        }
-    }
-
     _skipDx11Create = true;
 
     HRESULT result;
@@ -369,12 +305,6 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                                                D3D_FEATURE_LEVEL* pFeatureLevel,
                                                ID3D11DeviceContext** ppImmediateContext)
 {
-    LOG_INFO("hkD3D 11CreateDeviceAndSwapChain entry adapter={:X} features={} ppDevice={:X} ppSwapChain={:X} pSwapChainDesc={:X} quirk={}",
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)), FeatureLevels,
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppDevice)),
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppSwapChain)),
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pSwapChainDesc)),
-            static_cast<bool>(State::Instance().gameQuirks & GameQuirk::ForceD3D11On12));
     if (_skipDx11Create)
     {
 
@@ -482,102 +412,6 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
 
             if (localDesc.BufferCount < 2)
                 localDesc.BufferCount = 2;
-        }
-    }
-
-    if ((State::Instance().gameQuirks & GameQuirk::ForceD3D11On12) && o_D3D11On12CreateDevice != nullptr &&
-        ppDevice != nullptr && ppSwapChain != nullptr && pSwapChainDesc != nullptr)
-    {
-        D3D_FEATURE_LEVEL on12Level = (FeatureLevels > 0 && pFeatureLevels != nullptr) ? pFeatureLevels[0]
-                                                                                    : D3D_FEATURE_LEVEL_11_1;
-        ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
-        ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
-
-        if (dx12Device == nullptr)
-        {
-            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
-            LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
-                     static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
-        }
-
-        if (dx12Device != nullptr && dx12Queue == nullptr)
-        {
-            D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-            queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-            queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-            if (SUCCEEDED(dx12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&dx12Queue))))
-            {
-                LOG_INFO("D3D11On12 swapchain experiment: created D3D12 command queue {}", (UINT64) dx12Queue);
-            }
-        }
-
-        if (dx12Device != nullptr && dx12Queue != nullptr)
-        {
-            if (State::Instance().currentD3D12Device == nullptr || State::Instance().currentCommandQueue == nullptr)
-                WithDx12::SetD3D12Objects(dx12Device, dx12Queue, D3D12_COMMAND_LIST_TYPE_DIRECT);
-
-            DXGI_SWAP_CHAIN_DESC swapDesc = localDesc;
-            ID3D11Device* on12Device = nullptr;
-            ID3D11DeviceContext* on12Context = nullptr;
-            D3D_FEATURE_LEVEL chosenLevel = on12Level;
-            HRESULT createResult = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels,
-                                                        reinterpret_cast<IUnknown* const*>(&dx12Queue), 1, 0,
-                                                        &on12Device, &on12Context, &chosenLevel);
-
-            if (createResult == S_OK && on12Device != nullptr)
-            {
-                IDXGIDevice* dxgiDevice = nullptr;
-                if (SUCCEEDED(on12Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))) && dxgiDevice != nullptr)
-                {
-                    IDXGIAdapter* dxgiAdapter = nullptr;
-                    if (SUCCEEDED(dxgiDevice->GetAdapter(&dxgiAdapter)))
-                    {
-                        IDXGIFactory* dxgiFactory = nullptr;
-                        if (FAILED(dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory))))
-                            dxgiDevice->GetParent(IID_PPV_ARGS(&dxgiFactory));
-
-                        if (dxgiFactory != nullptr)
-                        {
-                            IDXGISwapChain* on12SwapChain = nullptr;
-                            HRESULT swapResult = dxgiFactory->CreateSwapChain(on12Device, &swapDesc, &on12SwapChain);
-
-                            if (SUCCEEDED(swapResult) && on12SwapChain != nullptr)
-                            {
-                                if (pFeatureLevel != nullptr)
-                                    *pFeatureLevel = chosenLevel;
-                                if (ppDevice != nullptr)
-                                    *ppDevice = on12Device;
-                                if (ppImmediateContext != nullptr)
-                                    *ppImmediateContext = on12Context;
-                                *ppSwapChain = on12SwapChain;
-
-                                State::Instance().d3d11Devices.push_back(on12Device);
-                                HookToDeviceLocal(on12Device);
-
-                                IDXGISwapChain* realSwapChain = nullptr;
-                                if (!Util::CheckForRealObject(__FUNCTION__, on12SwapChain, (IUnknown**) &realSwapChain))
-                                    realSwapChain = on12SwapChain;
-                                State::Instance().currentRealSwapchain = realSwapChain;
-                                State::Instance().screenWidth = static_cast<float>(pSwapChainDesc->BufferDesc.Width);
-                                State::Instance().screenHeight = static_cast<float>(pSwapChainDesc->BufferDesc.Height);
-
-                                LOG_INFO("ForceD3D11On 12: swapchain path created D3D11 device and swapchain");
-                                SAFE_RELEASE(dxgiFactory);
-                                SAFE_RELEASE(dxgiAdapter);
-                                SAFE_RELEASE(dxgiDevice);
-                                return swapResult;
-                            }
-                            LOG_ERROR("ForceD3D11On 12: swapchain experiment CreateSwapChain failed; native fallback");
-                            if (on12SwapChain != nullptr)
-                                on12SwapChain->Release();
-                        }
-                        SAFE_RELEASE(dxgiFactory);
-                    }
-                    SAFE_RELEASE(dxgiAdapter);
-                }
-                SAFE_RELEASE(dxgiDevice);
-            }
-            LOG_ERROR("ForceD3D 11On12: swapchain experiment CreateDevice failed; native fallback");
         }
     }
 
@@ -877,8 +711,6 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
 }
 
 void D3D11Hooks::HookToDevice(ID3D11Device* InDevice) { HookToDeviceLocal(InDevice); }
-
-bool D3D11Hooks::IsHooked() { return o_D3D11CreateDevice != nullptr || o_D3D11CreateDeviceAndSwapChain != nullptr; }
 
 void D3D11Hooks::Hook(HMODULE dx11Module)
 {

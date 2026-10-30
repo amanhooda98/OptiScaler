@@ -1249,9 +1249,6 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
     if (quirks & GameQuirk::HitmanReflexHacks)
         stringQuirks.push_back("Hack for broken Hitman reflex");
 
-    if (quirks & GameQuirk::ForceD3D11On12)
-        stringQuirks.push_back("Experimental: back game D3D11 device with D3D 11On12");
-
     if (quirks & GameQuirk::SkipD3D11FeatureLevelElevation)
         stringQuirks.push_back("Skipping D3D11 feature level elevation, native FSR3.1 will be disabled!");
 

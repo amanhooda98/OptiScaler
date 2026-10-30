@@ -1030,18 +1030,6 @@ HMODULE LibraryLoadHooks::LoadNvngxDlss(std::wstring originalPath)
 
 void LibraryLoadHooks::CheckModulesInMemory()
 {
-    // d3d11.dll is usually a static import, so the loader maps it before our hooks exist.
-    // Hook it as soon as it shows up instead of relying on the game calling LoadLibrary for it.
-    if (!D3D11Hooks::IsHooked())
-    {
-        HMODULE dx11Module = GetDllNameWModule(&dx11NamesW);
-        if (dx11Module != nullptr)
-        {
-            LOG_DEBUG("d3d11.dll appeared after load, hooking D3D11 device creation");
-            D3D11Hooks::Hook(dx11Module);
-        }
-    }
-
     const auto isLocalStreamlineModule = [](HMODULE module) -> bool
     {
         if (module == nullptr)

@@ -31,7 +31,6 @@ enum class GameQuirk : uint64_t
     CreateSLOnThe2ndDevice,
     XeFGCameraMotionFill,      // XeFG inputs: velocity has alpha 0 where only the camera moved (The Witcher 3)
     DLSSGFrameLatencyWaitable, // Game waits on the frame latency waitable, SL must not consume it too
-    ForceD3D11On12, // Experimental: back the game's D3D 11 device with D3D 11On12
     // Don't forget to add the new entry to printQuirks
     _
 };

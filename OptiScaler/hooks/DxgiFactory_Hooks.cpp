@@ -15,7 +15,6 @@
 #include <with_dx12/dx11_with_dx12_sc.h>
 
 #include <d3d11.h>
-#include <d3d11on12.h>
 #include <magic_enum.hpp>
 #include <detours/detours.h>
 
@@ -442,25 +441,6 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
 
     DXGI_SWAP_CHAIN_DESC localDesc {};
     memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
-
-    // D3D11On12 devices are D3D12-backed: DXGI rejects blt-model swapchains for them.
-    if ((State::Instance().gameQuirks & GameQuirk::ForceD3D11On12) && pDevice != nullptr)
-    {
-        ID3D11On12Device* on12Dev = nullptr;
-        if (SUCCEEDED(pDevice->QueryInterface(__uuidof(ID3D11On12Device), (void**) &on12Dev)) && on12Dev != nullptr)
-        {
-            on12Dev->Release();
-            LOG_INFO("CreateSwapChain on D3D11On12 device: SwapEffect {} BufferCount {}", (UINT) localDesc.SwapEffect,
-                     localDesc.BufferCount);
-
-            if (localDesc.SwapEffect != DXGI_SWAP_EFFECT_FLIP_DISCARD &&
-                localDesc.SwapEffect != DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL)
-                localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-
-            if (localDesc.BufferCount < 2)
-                localDesc.BufferCount = 2;
-        }
-    }
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, Windowed: {}, SwapEffect: {}, SkipWrapping: {}",
               localDesc.BufferDesc.Width, localDesc.BufferDesc.Height, (UINT) localDesc.BufferDesc.Format,

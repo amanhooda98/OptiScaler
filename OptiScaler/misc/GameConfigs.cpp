@@ -569,9 +569,6 @@ const std::vector<GameConfig> gameConfigs = {
     {
         .exes = { "dcs.exe" },
         .defaults = { UseFakenvapi = false },
-        // ForceD3D11On12 is not enabled: measured 11on12 gain is at most ~0.3 ms CPU/frame against a
-        // GPU-bound 10.7 ms frame, and it requires a flip-model swapchain DCS cannot drive.
-        // Re-add ForceD3D11On12 here to experiment with it.
     },
 
     // S.T.A.L.K.E.R.: Legends of the Zone Trilogy - Enhanced Editions
