@@ -434,7 +434,43 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
     {
         LOG_WARN("Overlay call!");
 
-            if ((State::Instance().gameQuirks & GameQuirk::ForceD3D11On12) && o_D3D11On12CreateDevice != nullptr &&
+        _skipDx11Create = true;
+        State::Instance().skipParentWrapping = true;
+
+        auto result = o_D3D11CreateDeviceAndSwapChain(pAdapter, DriverType, Software, Flags, pFeatureLevels,
+                                                      FeatureLevels, SDKVersion, pSwapChainDesc, ppSwapChain, ppDevice,
+                                                      pFeatureLevel, ppImmediateContext);
+
+        State::Instance().skipParentWrapping = false;
+        _skipDx11Create = false;
+
+        return result;
+    }
+
+    DXGI_SWAP_CHAIN_DESC localDesc {};
+
+    // For vsync override
+    if (pSwapChainDesc != nullptr)
+    {
+        memcpy(&localDesc, pSwapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
+
+        if (!pSwapChainDesc->Windowed)
+        {
+            LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
+            Config::Instance()->OverrideVsync.set_volatile_value(false);
+        }
+
+        if (Config::Instance()->OverrideVsync.value_or_default())
+        {
+            localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+
+            if (localDesc.BufferCount < 2)
+                localDesc.BufferCount = 2;
+        }
+    }
+
+    if ((State::Instance().gameQuirks & GameQuirk::ForceD3D11On12) && o_D3D11On12CreateDevice != nullptr &&
         ppDevice != nullptr && ppSwapChain != nullptr && pSwapChainDesc != nullptr)
     {
         D3D_FEATURE_LEVEL on12Level = (FeatureLevels > 0 && pFeatureLevels != nullptr) ? pFeatureLevels[0]
@@ -506,13 +542,13 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                                 State::Instance().screenWidth = static_cast<float>(pSwapChainDesc->BufferDesc.Width);
                                 State::Instance().screenHeight = static_cast<float>(pSwapChainDesc->BufferDesc.Height);
 
-                                LOG_INFO("ForceD3D11On12: swapchain path created D3D11 device and swapchain");
+                                LOG_INFO("ForceD3D11On 12: swapchain path created D3D11 device and swapchain");
                                 SAFE_RELEASE(dxgiFactory);
                                 SAFE_RELEASE(dxgiAdapter);
                                 SAFE_RELEASE(dxgiDevice);
                                 return swapResult;
                             }
-                            LOG_ERROR("ForceD3D11On12: swapchain experiment CreateSwapChain failed; native fallback");
+                            LOG_ERROR("ForceD3D11On 12: swapchain experiment CreateSwapChain failed; native fallback");
                             if (on12SwapChain != nullptr)
                                 on12SwapChain->Release();
                         }
@@ -522,43 +558,7 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                 }
                 SAFE_RELEASE(dxgiDevice);
             }
-            LOG_ERROR("ForceD3D11On12: swapchain experiment CreateDevice failed; native fallback");
-        }
-    }
-
-_skipDx11Create = true;
-        State::Instance().skipParentWrapping = true;
-
-        auto result = o_D3D11CreateDeviceAndSwapChain(pAdapter, DriverType, Software, Flags, pFeatureLevels,
-                                                      FeatureLevels, SDKVersion, pSwapChainDesc, ppSwapChain, ppDevice,
-                                                      pFeatureLevel, ppImmediateContext);
-
-        State::Instance().skipParentWrapping = false;
-        _skipDx11Create = false;
-
-        return result;
-    }
-
-    DXGI_SWAP_CHAIN_DESC localDesc {};
-
-    // For vsync override
-    if (pSwapChainDesc != nullptr)
-    {
-        memcpy(&localDesc, pSwapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
-
-        if (!pSwapChainDesc->Windowed)
-        {
-            LOG_INFO("Game is creating fullscreen swapchain, disabled V-Sync overrides");
-            Config::Instance()->OverrideVsync.set_volatile_value(false);
-        }
-
-        if (Config::Instance()->OverrideVsync.value_or_default())
-        {
-            localDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-            localDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
-            if (localDesc.BufferCount < 2)
-                localDesc.BufferCount = 2;
+            LOG_ERROR("ForceD3D 11On12: swapchain experiment CreateDevice failed; native fallback");
         }
     }
 
