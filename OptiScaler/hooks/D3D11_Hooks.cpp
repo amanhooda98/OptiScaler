@@ -302,7 +302,7 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
             ID3D11Device* on12Device = nullptr;
             ID3D11DeviceContext* on12Context = nullptr;
             D3D_FEATURE_LEVEL chosenLevel = on12Level;
-            HRESULT result = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels, &dx12Queue, 1, 0,
+            HRESULT result = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels, reinterpret_cast<IUnknown* const*>(&dx12Queue), 1, 0,
                                                    &on12Device, &on12Context, &chosenLevel);
 
             if (result == S_OK && on12Device != nullptr)
