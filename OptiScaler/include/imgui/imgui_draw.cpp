@@ -5306,7 +5306,7 @@ const char* ImFont::CalcWordWrapPosition(float size, const char* text, const cha
 
     ImFontBaked* baked = GetFontBaked(size);
     if (baked == NULL || baked->Size == 0.0f)
-        return;
+        return text_end;
     const float scale = size / baked->Size;
 
     float line_width = 0.0f;
@@ -5406,7 +5406,7 @@ ImVec2 ImFont::CalcTextSizeA(float size, float max_width, float wrap_width, cons
     const float line_height = size;
     ImFontBaked* baked = GetFontBaked(size);
     if (baked == NULL || baked->Size == 0.0f)
-        return;
+        return ImVec2(0, 0);
     const float scale = size / baked->Size;
 
     ImVec2 text_size = ImVec2(0, 0);
