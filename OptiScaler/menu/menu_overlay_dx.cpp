@@ -676,7 +676,11 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     ID3D12Device* device12 = nullptr;
 
     // try to obtain directx objects and find the path
-    if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
+    // Only needed until the overlay is initialised: while initialised, a replacement device is ignored anyway (the
+    // init block below never runs again), so this was two QueryInterface + three Release calls per frame for nothing.
+    if (!_isInited)
+    {
+        if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
     {
         if (!_dx11Device)
             LOG_DEBUG("D3D11Device captured");
@@ -698,6 +702,7 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
             _dx12Device = true;
         }
+    }
     }
 
     // Process window handle changed, update base

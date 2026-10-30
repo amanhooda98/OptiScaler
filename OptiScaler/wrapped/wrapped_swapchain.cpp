@@ -10,6 +10,7 @@
 #include <with_dx12/dx11_with_dx12_sync.h>
 
 #include <menu/menu_overlay_dx.h>
+#include <menu/menu_overlay_base.h>
 
 #include <misc/FrameLimit.h>
 #include <misc/DeferredRelease.h>
@@ -373,8 +374,13 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
     InputCommon::update();
 
-    // Upscaler GPU time computation
-    if (willPresent && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
+    // Upscaler GPU time computation. This is OSD telemetry and nothing else: the Dx12 interop path blocks the
+    // render thread in an unsynchronised readback Map and the Dx11 paths issue query Begin/End pairs every frame.
+    // Skip all of it unless the numbers are actually going to be displayed.
+    const bool osdNeedsGpuTiming = Config::Instance()->ShowFps.value_or_default() || MenuOverlayBase::IsVisible();
+    State::Instance().osdGpuTimingWanted = osdNeedsGpuTiming;
+
+    if (osdNeedsGpuTiming && willPresent && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
     {
         if (auto currentFeature = State::Instance().currentFeature; currentFeature != nullptr)
         {

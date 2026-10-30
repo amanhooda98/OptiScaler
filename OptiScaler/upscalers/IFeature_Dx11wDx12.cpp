@@ -106,11 +106,130 @@ void IFeature_Dx11wDx12::ReleaseSharedResources()
     // SAFE_RELEASE(Dx12Device);
 }
 
+// Pick the command allocator slot for this frame. The previous code always took `_frameCount % 3` and then blocked
+// until the fence stored for that slot three frames ago had passed. Any slot whose fence has already been reached is
+// equally safe to reset and does not stall the render thread, so prefer one of those and only fall back to the oldest
+// in-flight slot when the GPU is far enough behind that every slot is still busy. Both paths reset the same allocator
+// and record the same fence, so the submission order is unchanged.
+bool IFeature_Dx11wDx12::AcquireCommandFrame(UINT* outFrame)
+{
+    constexpr UINT slotCount = DX11WDX12_COMMAND_BUFFER_COUNT;
+
+    if (outFrame == nullptr)
+        return false;
+
+    if (Dx12Fence == nullptr)
+    {
+        *outFrame = (UINT) (_frameCount % slotCount);
+        return true;
+    }
+
+    const auto completed = Dx12Fence->GetCompletedValue();
+
+    UINT freeSlot = slotCount;
+    UINT oldestSlot = 0;
+    UINT64 oldestFence = 0;
+    UINT inFlight = 0;
+
+    for (UINT i = 0; i < slotCount; i++)
+    {
+        const auto slotFence = Dx12CommandAllocatorFenceValue[i];
+
+        if (slotFence == 0 || slotFence <= completed)
+        {
+            if (freeSlot == slotCount)
+                freeSlot = i;
+
+            continue;
+        }
+
+        inFlight++;
+
+        if (oldestFence == 0 || slotFence < oldestFence)
+        {
+            oldestFence = slotFence;
+            oldestSlot = i;
+        }
+    }
+
+    if (_allocatorMaxInFlight < inFlight)
+        _allocatorMaxInFlight = inFlight;
+
+    const UINT chosen = freeSlot != slotCount ? freeSlot : oldestSlot;
+    const UINT64 requiredFence = freeSlot != slotCount ? 0 : oldestFence;
+
+    if (freeSlot != slotCount)
+        _allocatorFreeSlotHits++;
+
+    if (requiredFence != 0)
+    {
+        const auto setResult = Dx12Fence->SetEventOnCompletion(requiredFence, Dx12FenceEvent);
+        if (setResult != S_OK)
+        {
+            LOG_ERROR("SetEventOnCompletion error for allocator {} fence {}: {:X}", chosen, requiredFence,
+                      (UINT) setResult);
+            return false;
+        }
+
+        const auto waitStart = Util::MillisecondsNow();
+        const auto waitResult = WaitForSingleObject(Dx12FenceEvent, 5000);
+        const auto waitMs = Util::MillisecondsNow() - waitStart;
+
+        _allocatorWaits++;
+        _allocatorWaitTotalMs += waitMs;
+        if (waitMs > _allocatorWaitMaxMs)
+            _allocatorWaitMaxMs = waitMs;
+
+        if (waitResult != WAIT_OBJECT_0)
+        {
+            if (waitResult == WAIT_TIMEOUT)
+            {
+                LOG_ERROR("Dx11wDx12 allocator wait timed out after {:.3f} ms, slot: {}, required fence: {}, "
+                          "completed: {}",
+                          waitMs, chosen, requiredFence, Dx12Fence->GetCompletedValue());
+            }
+            else
+            {
+                LOG_ERROR("WaitForSingleObject failed for allocator {} fence {}: {:X}", chosen, requiredFence,
+                          (UINT) waitResult);
+            }
+
+            return false;
+        }
+    }
+
+    // Aggregate the wait statistics into one line per second. Per-wait logging produced ~12.5k lines for a 15 minute
+    // session and made the log useless; this keeps the numbers that answer whether the ring is saturated by GPU
+    // back-pressure or by our own slot choice.
+    const auto now = Util::MillisecondsNow();
+
+    if (_allocatorTelemetryNextLog == 0.0)
+        _allocatorTelemetryNextLog = now + 1000.0;
+
+    if (now >= _allocatorTelemetryNextLog)
+    {
+        LOG_INFO("Dx11wDx12 allocator: in-flight max {}/{}, free slot hits {}, waits {}, wait total {:.0f} ms, wait "
+                 "max {:.2f} ms",
+                 _allocatorMaxInFlight, slotCount, _allocatorFreeSlotHits, _allocatorWaits, _allocatorWaitTotalMs,
+                 _allocatorWaitMaxMs);
+
+        _allocatorTelemetryNextLog = now + 1000.0;
+        _allocatorWaits = 0;
+        _allocatorFreeSlotHits = 0;
+        _allocatorWaitTotalMs = 0.0;
+        _allocatorWaitMaxMs = 0.0;
+        _allocatorMaxInFlight = inFlight;
+    }
+
+    *outFrame = chosen;
+    return true;
+}
+
 bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParameters)
 {
     HRESULT result;
 
-    const auto commandFrame = (UINT) (_frameCount % DX11WDX12_COMMAND_BUFFER_COUNT);
+    const auto commandFrame = _currentCommandFrame;
     const auto cacheFrameKey = Dx11WithDx12::NextUpscalerFrameId();
 
     auto mask = Dx11WithDx12::ResourceMask::Color | Dx11WithDx12::ResourceMask::Mv | Dx11WithDx12::ResourceMask::Depth |
@@ -164,52 +283,18 @@ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParame
         return false;
     }
 
-    const auto allocatorFenceValue = Dx12CommandAllocatorFenceValue[commandFrame];
-    const auto completedBefore = Dx12Fence->GetCompletedValue();
-    if (allocatorFenceValue != 0 && completedBefore < allocatorFenceValue)
+    // The allocator for this frame was already acquired (and waited on) in AcquireCommandFrame.
+    if (Dx12CommandAllocator[commandFrame] == nullptr || Dx12CommandList[commandFrame] == nullptr)
     {
-        result = Dx12Fence->SetEventOnCompletion(allocatorFenceValue, Dx12FenceEvent);
-        if (result != S_OK)
-        {
-            LOG_ERROR("SetEventOnCompletion error for allocator {} fence {}: {:X}", commandFrame, allocatorFenceValue,
-                      (UINT) result);
-            return false;
-        }
-
-        const auto waitStart = Util::MillisecondsNow();
-        const auto waitResult = WaitForSingleObject(Dx12FenceEvent, 5000);
-        const auto waitMs = Util::MillisecondsNow() - waitStart;
-        const auto completedAfter = Dx12Fence->GetCompletedValue();
-
-        if (waitMs > 0.25)
-        {
-            LOG_WARN("Dx11wDx12 allocator wait: {:.3f} ms, slot: {}, required fence: {}, completed before: {}, "
-                     "completed after: {}",
-                     waitMs, commandFrame, allocatorFenceValue, completedBefore, completedAfter);
-        }
-
-        if (waitResult != WAIT_OBJECT_0)
-        {
-            if (waitResult == WAIT_TIMEOUT)
-            {
-                LOG_ERROR("Dx11wDx12 allocator wait timed out after {:.3f} ms, slot: {}, required fence: {}, "
-                          "completed: {}",
-                          waitMs, commandFrame, allocatorFenceValue, completedAfter);
-            }
-            else
-            {
-                LOG_ERROR("WaitForSingleObject failed for allocator {} fence {}: {:X}", commandFrame,
-                          allocatorFenceValue, (UINT) waitResult);
-            }
-            return false;
-        }
+        LOG_ERROR("Dx11wDx12 command objects not created for slot {}", commandFrame);
+        return false;
     }
 
     result = Dx12CommandAllocator[commandFrame]->Reset();
     if (result != S_OK)
     {
         LOG_ERROR("CommandAllocator Reset error for frame {}, allocator fence {}, completed {}: {:X}", commandFrame,
-                  allocatorFenceValue, Dx12Fence->GetCompletedValue(), (UINT) result);
+                  Dx12CommandAllocatorFenceValue[commandFrame], Dx12Fence->GetCompletedValue(), (UINT) result);
         return false;
     }
 
@@ -288,7 +373,9 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
         result = InDeviceContext->QueryInterface(IID_PPV_ARGS(&dc));
     }
 
-    ScopedGpuTime_Dx11 scopedGpuTime(UpscalerTime.get(), InDeviceContext);
+    // GPU timing is only collected when the OSD is on screen; ScopedGpuTime_Dx11 tolerates a null timer.
+    ScopedGpuTime_Dx11 scopedGpuTime(State::Instance().osdGpuTimingWanted ? UpscalerTime.get() : nullptr,
+                                     InDeviceContext);
 
     if (InDeviceContext != Dx11DeviceContext && result != S_OK)
     {
@@ -314,7 +401,12 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     if (dc != nullptr)
         dc->Release();
 
-    const auto commandFrame = (UINT) (_frameCount % DX11WDX12_COMMAND_BUFFER_COUNT);
+    // Acquire (and wait for) the command slot for this frame before the command list is recorded. ProcessDx11Textures
+    // resets that same slot below.
+    if (!AcquireCommandFrame(&_currentCommandFrame))
+        return false;
+
+    const auto commandFrame = _currentCommandFrame;
     const auto resourceFrame = (UINT) (_frameCount % DX11_WITH_DX12_CACHED_FRAMES);
     auto cmdList = Dx12CommandList[commandFrame];
 

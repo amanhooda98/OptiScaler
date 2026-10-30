@@ -479,6 +479,14 @@ static HRESULT hkCreateSamplerState(ID3D11Device* This, const D3D11_SAMPLER_DESC
     if (pSamplerDesc == nullptr || This == nullptr)
         return E_INVALIDARG;
 
+    // Hot path: DCS creates ~1.5 samplers per frame. Only take the copy-and-rebuild route when an override that
+    // actually changes the descriptor is configured; otherwise hand the original through untouched.
+    const auto config = Config::Instance();
+
+    if (!config->AnisotropyOverride.has_value() && !config->MipmapBiasOverride.has_value() &&
+        !config->MipmapBiasOverrideAll.value_or_default())
+        return o_CreateSamplerState(This, pSamplerDesc, ppSamplerState);
+
     LOG_FUNC();
 
     D3D11_SAMPLER_DESC newDesc {};

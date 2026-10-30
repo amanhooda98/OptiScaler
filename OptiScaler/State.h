@@ -9,6 +9,7 @@
 #include <inputs/FG/Streamline_Inputs_Sl1_Dx12.h>
 
 #include <chrono>
+#include <atomic>
 #include <set>
 #include <deque>
 #include <mutex>
@@ -388,6 +389,9 @@ class State
     // Time the game's last present to the FG swapchain took, with the FPS limiter's sleep (V-Sync, a full queue)
     double lastFGPresentMs = 0.0;
     std::mutex frameTimeMutex;
+    // Set once per frame by the present path. GPU timing is only collected when the OSD is actually on screen:
+    // the Dx12 readback Map and the Dx11 query pairs are per-frame render thread work that nobody reads otherwise.
+    std::atomic<bool> osdGpuTimingWanted { false };
 
     // Opti checking if everything is setup correctly on game launch
     // Takes effect up to the first time Opti can show anything on the screen

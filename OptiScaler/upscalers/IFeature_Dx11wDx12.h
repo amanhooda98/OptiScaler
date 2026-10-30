@@ -40,10 +40,23 @@ class IFeature_Dx11wDx12 : public virtual IFeature_Dx11
     UINT64 Dx12FenceValue = 0;
     UINT64 Dx12CommandAllocatorFenceValue[DX11WDX12_COMMAND_BUFFER_COUNT] = {};
 
+    // Command slot chosen for the frame currently being processed. ProcessDx11Textures picks it (that is where the
+    // allocator is reset) and Evaluate must record into the same one.
+    UINT _currentCommandFrame = 0;
+
+    // Allocator-wait telemetry, aggregated and logged once per second instead of once per frame.
+    double _allocatorTelemetryNextLog = 0.0;
+    uint32_t _allocatorWaits = 0;
+    uint32_t _allocatorFreeSlotHits = 0;
+    uint32_t _allocatorMaxInFlight = 0;
+    double _allocatorWaitTotalMs = 0.0;
+    double _allocatorWaitMaxMs = 0.0;
+
     // Per feature, sharing it between features makes them recreate each other's in-flight resources
     Dx11WithDx12::D3D11_UPSCALER_RESOURCE_CACHE_C ResourceCache = {};
 
     bool CreateD3D12Objects();
+    bool AcquireCommandFrame(UINT* outFrame);
     bool ProcessDx11Textures(const NVSDK_NGX_Parameter* InParameters);
     bool CopyBackOutput();
 
