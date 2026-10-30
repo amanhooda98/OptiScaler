@@ -669,8 +669,6 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         return;
     }
 
-    LOG_DEBUG("");
-
     ID3D12CommandQueue* cq = nullptr;
     ID3D11Device* device = nullptr;
     ID3D12Device* device12 = nullptr;

@@ -208,10 +208,13 @@ bool IFeature_Dx11wDx12::AcquireCommandFrame(UINT* outFrame)
 
     if (now >= _allocatorTelemetryNextLog)
     {
+        const auto interop = Dx11WithDx12::ConsumeInteropCopyStats();
+
         LOG_INFO("Dx11wDx12 allocator: in-flight max {}/{}, free slot hits {}, waits {}, wait total {:.0f} ms, wait "
-                 "max {:.2f} ms",
+                 "max {:.2f} ms | interop in copies {} direct {}, out copies {} direct {}",
                  _allocatorMaxInFlight, slotCount, _allocatorFreeSlotHits, _allocatorWaits, _allocatorWaitTotalMs,
-                 _allocatorWaitMaxMs);
+                 _allocatorWaitMaxMs, interop.InputCopies, interop.InputDirectShares, interop.OutputCopies,
+                 interop.OutputDirectShares);
 
         _allocatorTelemetryNextLog = now + 1000.0;
         _allocatorWaits = 0;
@@ -357,8 +360,6 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     if ((_frameCount & 3) == 0)
         DeferredRelease::Collect();
 
-    LOG_FUNC();
-
     if (!IsInited())
         return false;
 
@@ -397,9 +398,13 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
             return false;
         }
     }
-
-    if (dc != nullptr)
+    else if (InDeviceContext != Dx11DeviceContext && dc != nullptr)
+    {
+        // The QueryInterface above added a reference to a context we already hold (a different interface of the same
+        // object), so it is the only case where the reference must be dropped here. When the context actually changed
+        // the member took ownership of it, and when no QueryInterface ran there is nothing to release at all.
         dc->Release();
+    }
 
     // Acquire (and wait for) the command slot for this frame before the command list is recorded. ProcessDx11Textures
     // resets that same slot below.

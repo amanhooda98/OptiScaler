@@ -270,6 +270,20 @@ void ReportD3D12LiveObjects(ID3D12Device* device)
 #endif
 #endif
 
+// LocalPresent used to re-read the swapchain description and re-probe the present device every frame: one
+// IDXGISwapChain::GetDesc and up to two IUnknown::QueryInterface calls per present, each a COM round trip on the
+// render thread. Neither value can change without the swapchain or its device being recreated, so both results are
+// cached here and invalidated from the resize paths (ResizeBuffers/ResizeBuffers1/ResizeTarget) and whenever the
+// swapchain or device pointer changes.
+static IDXGISwapChain* swapchainDescCacheOwner = nullptr;
+static bool swapchainDescCacheValid = false;
+
+static IUnknown* presentDeviceProbeOwner = nullptr;
+static bool presentDeviceProbeIsD3D11 = false;
+static ID3D11Device* presentDeviceProbeD3D11 = nullptr;
+static ID3D12Device* presentDeviceProbeD3D12 = nullptr;
+static ID3D12CommandQueue* presentDeviceProbeQueue = nullptr;
+
 static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags,
                             const DXGI_PRESENT_PARAMETERS* pPresentParameters, IUnknown* pDevice, HWND hWnd, bool isUWP)
 {
@@ -288,8 +302,6 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     {
         dx11wDx12PresentLock.lock();
     }
-
-    LOG_DEBUG("{}", _frameCounter);
 
     HRESULT presentResult;
 
@@ -310,11 +322,19 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         if (State::Instance().currentFG == nullptr)
             State::Instance().lastFGFrameTime = ftDelta;
 
-        LOG_DEBUG("SyncInterval: {}, Flags: {:X}, Frametime: {:0.3f} ms", SyncInterval, Flags, ftDelta);
-
-        // Update swapchain info evey frame
-        if (pSwapChain->GetDesc(&State::Instance().currentSwapchainDesc) != S_OK)
-            LOG_WARN("Can't get swapchain desc!");
+        // Update swapchain info only when it can have changed: a new swapchain, or a resize that cleared the cache.
+        if (!swapchainDescCacheValid || swapchainDescCacheOwner != pSwapChain)
+        {
+            if (pSwapChain->GetDesc(&State::Instance().currentSwapchainDesc) == S_OK)
+            {
+                swapchainDescCacheOwner = pSwapChain;
+                swapchainDescCacheValid = true;
+            }
+            else
+            {
+                LOG_WARN("Can't get swapchain desc!");
+            }
+        }
     }
 
     ID3D11Device* device = nullptr;
@@ -323,47 +343,70 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
     bool isD3D11 = false;
 
-    // try to obtain directx objects and find the path
-    if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
+    // try to obtain directx objects and find the path; the result is cached per device pointer
+    if (presentDeviceProbeOwner != pDevice)
     {
-        isD3D11 = true;
-        device->Release();
+        presentDeviceProbeOwner = pDevice;
+        presentDeviceProbeIsD3D11 = false;
+        presentDeviceProbeD3D11 = nullptr;
+        presentDeviceProbeD3D12 = nullptr;
+        presentDeviceProbeQueue = nullptr;
 
-        if (!_dx11Device)
-            LOG_DEBUG("D3D11Device captured");
-
-        _dx11Device = true;
-        State::Instance().swapchainApi = DX11;
-        State::Instance().currentD3D11Device = device;
-    }
-    else if (pDevice->QueryInterface(IID_PPV_ARGS(&cq)) == S_OK)
-    {
-        cq->Release();
-
-        if (!_dx12Device)
-            LOG_DEBUG("D3D12CommandQueue captured");
-
-        ID3D12CommandQueue* realQueue = nullptr;
-        if (Util::CheckForRealObject(__FUNCTION__, cq, (IUnknown**) &realQueue))
-            cq = realQueue;
-
-        State::Instance().swapchainApi = DX12;
-
-        if (State::Instance().currentCommandQueue == nullptr)
-            State::Instance().currentCommandQueue = cq;
-
-        if (cq->GetDevice(IID_PPV_ARGS(&device12)) == S_OK)
+        if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
         {
-            device12->Release();
+            isD3D11 = true;
+            device->Release();
+
+            if (!_dx11Device)
+                LOG_DEBUG("D3D11Device captured");
+
+            _dx11Device = true;
+            State::Instance().swapchainApi = DX11;
+            State::Instance().currentD3D11Device = device;
+
+            presentDeviceProbeIsD3D11 = true;
+            presentDeviceProbeD3D11 = device;
+        }
+        else if (pDevice->QueryInterface(IID_PPV_ARGS(&cq)) == S_OK)
+        {
+            cq->Release();
 
             if (!_dx12Device)
-                LOG_DEBUG("D3D12Device captured");
+                LOG_DEBUG("D3D12CommandQueue captured");
 
-            _dx12Device = true;
+            ID3D12CommandQueue* realQueue = nullptr;
+            if (Util::CheckForRealObject(__FUNCTION__, cq, (IUnknown**) &realQueue))
+                cq = realQueue;
 
-            State::Instance().currentD3D12Device = device12;
-            D3D12Hooks::HookDevice(device12);
+            State::Instance().swapchainApi = DX12;
+
+            if (State::Instance().currentCommandQueue == nullptr)
+                State::Instance().currentCommandQueue = cq;
+
+            if (cq->GetDevice(IID_PPV_ARGS(&device12)) == S_OK)
+            {
+                device12->Release();
+
+                if (!_dx12Device)
+                    LOG_DEBUG("D3D12Device captured");
+
+                _dx12Device = true;
+
+                State::Instance().currentD3D12Device = device12;
+                D3D12Hooks::HookDevice(device12);
+
+                presentDeviceProbeD3D12 = device12;
+            }
+
+            presentDeviceProbeQueue = cq;
         }
+    }
+    else
+    {
+        isD3D11 = presentDeviceProbeIsD3D11;
+        device = presentDeviceProbeD3D11;
+        device12 = presentDeviceProbeD3D12;
+        cq = presentDeviceProbeQueue;
     }
 
     auto fg = State::Instance().currentFG;
@@ -505,8 +548,6 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         _frameCounter++;
         State::Instance().frameCount = _frameCounter;
     }
-
-    LOG_DEBUG("Calling original present");
 
     // swapchain present
     if (pPresentParameters == nullptr)
@@ -999,6 +1040,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
     if (result == S_OK && _real->GetDesc(&State::Instance().currentSwapchainDesc) != S_OK)
         LOG_WARN("Can't get swapchain desc!");
 
+    // Buffers changed, so LocalPresent must re-read the description for the next present
+    swapchainDescCacheValid = false;
+
     if (result == DXGI_ERROR_DEVICE_REMOVED && State::Instance().currentD3D12Device != nullptr)
         Util::GetDeviceRemovedReason(State::Instance().currentD3D12Device);
 
@@ -1100,7 +1144,10 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
 
 HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeTarget(const DXGI_MODE_DESC* pNewTargetParameters)
 {
-    return _real->ResizeTarget(pNewTargetParameters);
+    // The cached swapchain description may no longer match the new mode select
+    auto result = _real->ResizeTarget(pNewTargetParameters);
+    swapchainDescCacheValid = false;
+    return result;
 }
 
 HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::GetContainingOutput(IDXGIOutput** ppOutput)
@@ -1424,6 +1471,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
     // Game recreates its views before the next present, resource tracking filters them by swapchain size
     if (result == S_OK && _real->GetDesc(&State::Instance().currentSwapchainDesc) != S_OK)
         LOG_WARN("Can't get swapchain desc!");
+
+    // Buffers changed, so LocalPresent must re-read the description for the next present
+    swapchainDescCacheValid = false;
 
     if (result == DXGI_ERROR_DEVICE_REMOVED && State::Instance().currentD3D12Device != nullptr)
         Util::GetDeviceRemovedReason(State::Instance().currentD3D12Device);

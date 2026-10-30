@@ -45,6 +45,46 @@ Dx11WithDx12::D3D11_TEXTURE2D_DESC_C CaptureDesc(const D3D11_TEXTURE2D_DESC& des
     return result;
 }
 
+// Interop copy telemetry, incremented from the texture preparation paths and drained once per second by the
+// allocator telemetry in IFeature_Dx11wDx12::AcquireCommandFrame.
+namespace
+{
+std::atomic<uint64_t> interopInputCopies { 0 };
+std::atomic<uint64_t> interopInputDirectShares { 0 };
+std::atomic<uint64_t> interopOutputCopies { 0 };
+std::atomic<uint64_t> interopOutputDirectShares { 0 };
+} // namespace
+
+Dx11WithDx12::InteropCopyStats Dx11WithDx12::ConsumeInteropCopyStats()
+{
+    InteropCopyStats stats = {};
+    stats.InputCopies = interopInputCopies.exchange(0, std::memory_order_relaxed);
+    stats.InputDirectShares = interopInputDirectShares.exchange(0, std::memory_order_relaxed);
+    stats.OutputCopies = interopOutputCopies.exchange(0, std::memory_order_relaxed);
+    stats.OutputDirectShares = interopOutputDirectShares.exchange(0, std::memory_order_relaxed);
+    return stats;
+}
+
+namespace
+{
+// Counts an input resource once per frame, whether it was copied or read in place through its shared handle
+void CountInputInterop(Dx11WithDx12::D3D11_TEXTURE2D_RESOURCE_C& resource, UINT64 frameId, bool copied)
+{
+    if (frameId != 0)
+    {
+        if (resource.LastCountedFrame == frameId)
+            return;
+
+        resource.LastCountedFrame = frameId;
+    }
+
+    if (copied)
+        interopInputCopies.fetch_add(1, std::memory_order_relaxed);
+    else
+        interopInputDirectShares.fetch_add(1, std::memory_order_relaxed);
+}
+} // namespace
+
 namespace
 {
 struct NTSharedTextureKey
@@ -598,7 +638,10 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
         }
 
         if (InCopy && OutResource->SharedTexture != nullptr)
+        {
             Dx11DeviceContext->CopyResource(OutResource->SharedTexture, InResource);
+            interopInputCopies.fetch_add(1, std::memory_order_relaxed);
+        }
     }
     else if (!sourceHasLegacyShared && !sourceHasNTShared && InDontUseNTShared)
     {
@@ -722,7 +765,10 @@ bool Dx11WithDx12::CopyTextureFrom11To12(ID3D11Resource* InResource, D3D11_TEXTU
             }
 
             if (InCopy && OutResource->SharedTexture != nullptr)
+            {
                 Dx11DeviceContext->CopyResource(OutResource->SharedTexture, InResource);
+                interopInputCopies.fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
     else
@@ -816,10 +862,13 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
                     LOG_ERROR("{} persistent depth transfer dispatch failed", name);
                     return false;
                 }
+
+                interopInputCopies.fetch_add(1, std::memory_order_relaxed);
             }
             else if (shared->SharedTexture != nullptr)
             {
                 Dx11DeviceContext->CopyResource(shared->SharedTexture, resource);
+                interopInputCopies.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
@@ -864,10 +913,13 @@ bool Dx11WithDx12::PrepareTextureFrom11To12(const std::string& name, ID3D12Devic
                     LOG_ERROR("{} persistent depth transfer dispatch failed", name);
                     return false;
                 }
+
+                interopInputCopies.fetch_add(1, std::memory_order_relaxed);
             }
             else if (shared->SharedTexture != nullptr)
             {
                 Dx11DeviceContext->CopyResource(shared->SharedTexture, resource);
+                interopInputCopies.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
@@ -1039,8 +1091,17 @@ bool PrepareCachedResource(const char* name, const NVSDK_NGX_Parameter* paramete
         return !required;
     }
 
-    return Dx11WithDx12::PrepareTextureFrom11To12(name, dx12Device, resource, cacheEntry, copy, depth, dontUseNTShared,
-                                                  frameId);
+    // The copy telemetry is derived from the counter delta across the prepare call: any input copy performed below
+    // (including the depth conversion dispatch) shows up as an increment, everything else was read in place through
+    // the shared handle. Counted once per resource per upscaler frame.
+    const uint64_t copiesBefore = interopInputCopies.load(std::memory_order_relaxed);
+    const bool result = Dx11WithDx12::PrepareTextureFrom11To12(name, dx12Device, resource, cacheEntry, copy, depth,
+                                                               dontUseNTShared, frameId);
+
+    if (result)
+        CountInputInterop(*cacheEntry, frameId, interopInputCopies.load(std::memory_order_relaxed) != copiesBefore);
+
+    return result;
 }
 } // namespace
 
@@ -1189,7 +1250,14 @@ bool Dx11WithDx12::CopyUpscalerOutputToDx11(D3D11_UPSCALER_RESOURCE_CACHE_C& cac
     }
 
     if (static_cast<ID3D11Resource*>(cache.Output[outputIndex].SharedTexture) != cache.ParamOutput[outputIndex])
+    {
         Dx11DeviceContext->CopyResource(cache.ParamOutput[outputIndex], cache.Output[outputIndex].SharedTexture);
+        interopOutputCopies.fetch_add(1, std::memory_order_relaxed);
+    }
+    else
+    {
+        interopOutputDirectShares.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // After a CPU wait the D3D11 queue is idle, submit right away instead of waiting for the next flush
     if (UseCpuWaitForDx12())

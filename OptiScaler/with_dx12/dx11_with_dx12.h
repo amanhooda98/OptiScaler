@@ -106,6 +106,10 @@ class Dx11WithDx12
         bool LastPreparedCopy = false;
         bool LastPreparedDepth = false;
 
+        // Frame id this entry last contributed to the interop copy counters, so a resource prepared twice in one frame
+        // is counted once
+        UINT64 LastCountedFrame = 0;
+
         // Owned, used when depth needs a format conversion before sharing
         DepthTransfer_Dx11* DepthTransfer = nullptr;
         D3D11_TEXTURE2D_DESC DepthTransferSourceDesc = {};
@@ -160,6 +164,20 @@ class Dx11WithDx12
     static bool SyncDx11ToDx12();
     static bool SyncDx12ToDx11();
     static bool CopyUpscalerOutputToDx11(D3D11_UPSCALER_RESOURCE_CACHE_C& cache, UINT frameIndex);
+
+    // Interop copy telemetry. Answers the only question that matters about the D3D11->D3D12 path's GPU cost: are the
+    // game's textures read/written in place through their shared handles (no copy) or does OptiScaler upload/download
+    // full frames. Counted per prepared resource and per presented frame, read at 1 Hz by the allocator telemetry.
+    struct InteropCopyStats
+    {
+        UINT64 InputCopies = 0;
+        UINT64 InputDirectShares = 0;
+        UINT64 OutputCopies = 0;
+        UINT64 OutputDirectShares = 0;
+    };
+
+    // Returns the counters accumulated so far and resets them
+    static InteropCopyStats ConsumeInteropCopyStats();
 
     static bool CheckMask(ResourceMask mask, ResourceMask resource);
 
