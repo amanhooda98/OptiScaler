@@ -261,6 +261,11 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
     ImGuiIO& io = ImGui::GetIO();
     (void) io;
 
+    // Run the menu logic frame first: it consumes shortcut input and only starts an ImGui frame when the overlay
+    // actually needs one. Everything below is GPU work for a frame nobody is going to see, so bail out early.
+    if (!MenuOverlayBase::RenderMenu())
+        return;
+
     if (io.BackendRendererUserData == nullptr)
     {
         if (pSwapChain->GetDevice(IID_PPV_ARGS(&g_pd3dDevice)) == S_OK)
@@ -279,8 +284,8 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
 
         if (ImGui::GetCurrentContext() && g_pd3dRenderTarget)
         {
+            // ImGui_ImplWin32_NewFrame already ran inside the menu frame
             ImGui_ImplDX11_NewFrame();
-            ImGui_ImplWin32_NewFrame();
 
             ID3D11Texture2D* backBuffer = nullptr;
             pSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
@@ -300,16 +305,13 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
             else
                 MenuCommon::SetBackgroundBlur(ImTextureID_Invalid);
 
-            if (MenuOverlayBase::RenderMenu())
-            {
-                ImGui::Render();
+            ImGui::Render();
 
-                if (blurReady && MenuCommon::BackgroundBlurUsed())
-                    g_menuBlurDx11->Dispatch(g_pd3dDeviceContext, backBuffer);
+            if (blurReady && MenuCommon::BackgroundBlurUsed())
+                g_menuBlurDx11->Dispatch(g_pd3dDeviceContext, backBuffer);
 
-                g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pd3dRenderTarget, NULL);
-                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-            }
+            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pd3dRenderTarget, NULL);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
             if (backBuffer != nullptr)
                 backBuffer->Release();
