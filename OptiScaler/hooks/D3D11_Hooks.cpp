@@ -6,6 +6,8 @@
 #include <Util.h>
 #include <Config.h>
 
+#include <with_dx12/with_dx12.h>
+
 #include <proxies/KernelBase_Proxy.h>
 
 #include <wrapped/wrapped_swapchain.h>
@@ -268,6 +270,59 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
 
             pFeatureLevels = levels;
             FeatureLevels = ARRAYSIZE(levels);
+        }
+    }
+
+    if (State::Instance().gameQuirks & GameQuirk::ForceD3D11On12 && o_D3D11On12CreateDevice != nullptr && ppDevice != nullptr)
+    {
+        D3D_FEATURE_LEVEL on12Level = (FeatureLevels > 0 && pFeatureLevels != nullptr) ? pFeatureLevels[0]
+                                                                                    : D3D_FEATURE_LEVEL_11_1;
+        ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
+        ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
+
+        if (dx12Device == nullptr && pAdapter != nullptr)
+            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
+
+        if (dx12Device != nullptr && dx12Queue == nullptr)
+        {
+            D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+            queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+            queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+            if (SUCCEEDED(dx12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&dx12Queue))))
+            {
+                LOG_INFO("D3D11On12 device experiment: created D3D12 command queue {}", (UINT64) dx12Queue);
+            }
+        }
+
+        if (dx12Device != nullptr && dx12Queue != nullptr && o_D3D11On12CreateDevice != nullptr)
+        {
+            if (State::Instance().currentD3D12Device == nullptr || State::Instance().currentCommandQueue == nullptr)
+                WithDx12::SetD3D12Objects(dx12Device, dx12Queue, D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+            ID3D11Device* on12Device = nullptr;
+            ID3D11DeviceContext* on12Context = nullptr;
+            D3D_FEATURE_LEVEL chosenLevel = on12Level;
+            HRESULT result = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels, &dx12Queue, 1, 0,
+                                                   &on12Device, &on12Context, &chosenLevel);
+
+            if (result == S_OK && on12Device != nullptr)
+            {
+                if (pFeatureLevel != nullptr)
+                    *pFeatureLevel = chosenLevel;
+                if (ppDevice != nullptr)
+                    *ppDevice = on12Device;
+                if (ppImmediateContext != nullptr)
+                    *ppImmediateContext = on12Context;
+
+                State::Instance().d3d11Devices.push_back(on12Device);
+                HookToDeviceLocal(on12Device);
+
+                LOG_INFO("ForceD3D11On12: created MS-backed D3D11 device {:X}; D3D12 queue {:X}", (UINT64) on12Device,
+                         (UINT64) dx12Queue);
+                return result;
+            }
+
+            LOG_ERROR("ForceD3D11On 12: D3D11On12CreateDevice failed {:X}; using native D3D11 fallback", (UINT) result);
         }
     }
 

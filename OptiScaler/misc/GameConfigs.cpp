@@ -569,6 +569,7 @@ const std::vector<GameConfig> gameConfigs = {
     {
         .exes = { "dcs.exe" },
         .defaults = { UseFakenvapi = false },
+        .quirks = { ForceD3D11On12 },
     },
 
     // S.T.A.L.K.E.R.: Legends of the Zone Trilogy - Enhanced Editions
