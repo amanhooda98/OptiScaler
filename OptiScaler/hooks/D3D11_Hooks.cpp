@@ -287,8 +287,7 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
 
         if (dx12Device == nullptr)
         {
-            dx12Device = pAdapter != nullptr ? WithDx12::RequestD3D12Device(on12Level, pAdapter)
-                                             : WithDx12::RequestD3D12Device(on12Level);
+            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
             LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
                      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
         }
@@ -496,8 +495,7 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
 
         if (dx12Device == nullptr)
         {
-            dx12Device = pAdapter != nullptr ? WithDx12::RequestD3D12Device(on12Level, pAdapter)
-                                             : WithDx12::RequestD3D12Device(on12Level);
+            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
             LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
                      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
         }
