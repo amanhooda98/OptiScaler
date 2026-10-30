@@ -681,28 +681,28 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     if (!_isInited)
     {
         if (pDevice->QueryInterface(IID_PPV_ARGS(&device)) == S_OK)
-    {
-        if (!_dx11Device)
-            LOG_DEBUG("D3D11Device captured");
+        {
+            if (!_dx11Device)
+                LOG_DEBUG("D3D11Device captured");
 
-        _dx11Device = true;
-    }
-    else if (pDevice->QueryInterface(IID_PPV_ARGS(&cq)) == S_OK)
-    {
-        if (!_dx12Device)
-            LOG_DEBUG("D3D12CommandQueue captured");
-
-        if (!CheckForRealObject(__FUNCTION__, pDevice, &currentSCCommandQueue))
-            currentSCCommandQueue = pDevice;
-
-        if (((ID3D12CommandQueue*) currentSCCommandQueue)->GetDevice(IID_PPV_ARGS(&device12)) == S_OK)
+            _dx11Device = true;
+        }
+        else if (pDevice->QueryInterface(IID_PPV_ARGS(&cq)) == S_OK)
         {
             if (!_dx12Device)
-                LOG_DEBUG("D3D12Device captured");
+                LOG_DEBUG("D3D12CommandQueue captured");
 
-            _dx12Device = true;
+            if (!CheckForRealObject(__FUNCTION__, pDevice, &currentSCCommandQueue))
+                currentSCCommandQueue = pDevice;
+
+            if (((ID3D12CommandQueue*) currentSCCommandQueue)->GetDevice(IID_PPV_ARGS(&device12)) == S_OK)
+            {
+                if (!_dx12Device)
+                    LOG_DEBUG("D3D12Device captured");
+
+                _dx12Device = true;
+            }
         }
-    }
     }
 
     // Process window handle changed, update base

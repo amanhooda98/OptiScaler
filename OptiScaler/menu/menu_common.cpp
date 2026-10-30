@@ -2491,7 +2491,8 @@ void MenuCommon::RenderSplashWindow(RenderMenuContext& ctx)
 void MenuCommon::RenderNotifications(RenderMenuContext& ctx)
 {
     // BeginMenuFrameIfNeeded only starts an ImGui frame when there is something to draw (splash, FPS overlay, visible
-    // menu or a pending notification). Without a frame, the ImGui calls below would be issued outside NewFrame/EndFrame.
+    // menu or a pending notification). Without a frame, the ImGui calls below would be issued outside
+    // NewFrame/EndFrame.
     if (!ctx.newFrame)
         return;
 
