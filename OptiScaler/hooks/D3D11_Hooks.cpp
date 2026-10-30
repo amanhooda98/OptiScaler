@@ -203,6 +203,11 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
                                    ID3D11Device** ppDevice, D3D_FEATURE_LEVEL* pFeatureLevel,
                                    ID3D11DeviceContext** ppImmediateContext)
 {
+    LOG_INFO("hkD3D 11CreateDevice entry adapter={:X} features={} ppDevice={:X} ppCtx={:X} quirk={}",
+             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)), FeatureLevels,
+             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppDevice)),
+             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppImmediateContext)),
+             static_cast<bool>(State::Instance().gameQuirks & GameQuirk::ForceD3D11On12));
     if (_skipDx11Create)
     {
         LOG_DEBUG("Skip");
@@ -360,6 +365,12 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
                                                D3D_FEATURE_LEVEL* pFeatureLevel,
                                                ID3D11DeviceContext** ppImmediateContext)
 {
+    LOG_INFO("hkD3D 11CreateDeviceAndSwapChain entry adapter={:X} features={} ppDevice={:X} ppSwapChain={:X} pSwapChainDesc={:X} quirk={}",
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)), FeatureLevels,
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppDevice)),
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ppSwapChain)),
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pSwapChainDesc)),
+            static_cast<bool>(State::Instance().gameQuirks & GameQuirk::ForceD3D11On12));
     if (_skipDx11Create)
     {
 
