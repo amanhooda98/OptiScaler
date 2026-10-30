@@ -285,8 +285,13 @@ static HRESULT hkD3D11CreateDevice(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE Drive
         ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
         ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
 
-        if (dx12Device == nullptr && pAdapter != nullptr)
-            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
+        if (dx12Device == nullptr)
+        {
+            dx12Device = pAdapter != nullptr ? WithDx12::RequestD3D12Device(on12Level, pAdapter)
+                                             : WithDx12::RequestD3D12Device(on12Level);
+            LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
+                     static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
+        }
 
         if (dx12Device != nullptr && dx12Queue == nullptr)
         {
@@ -489,8 +494,13 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
         ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
         ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
 
-        if (dx12Device == nullptr && pAdapter != nullptr)
-            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
+        if (dx12Device == nullptr)
+        {
+            dx12Device = pAdapter != nullptr ? WithDx12::RequestD3D12Device(on12Level, pAdapter)
+                                             : WithDx12::RequestD3D12Device(on12Level);
+            LOG_INFO("ForceD3D11On12: D3D12 device {} (adapter {:X})", dx12Device != nullptr ? "created" : "FAILED",
+                     static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pAdapter)));
+        }
 
         if (dx12Device != nullptr && dx12Queue == nullptr)
         {
@@ -869,6 +879,8 @@ static HRESULT hkCreateTexture2D(ID3D11Device* This, const D3D11_TEXTURE2D_DESC*
 }
 
 void D3D11Hooks::HookToDevice(ID3D11Device* InDevice) { HookToDeviceLocal(InDevice); }
+
+bool D3D11Hooks::IsHooked() { return o_D3D11CreateDevice != nullptr || o_D3D11CreateDeviceAndSwapChain != nullptr; }
 
 void D3D11Hooks::Hook(HMODULE dx11Module)
 {

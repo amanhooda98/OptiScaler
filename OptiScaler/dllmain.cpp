@@ -963,10 +963,14 @@ static void CheckWorkingMode()
 
     // DirectX 11
     d3d11Module = GetDllNameWModule(&dx11NamesW);
-    if (Config::Instance()->OverlayMenu.value_or_default() && d3d11Module != nullptr)
+    if (d3d11Module != nullptr)
     {
-        LOG_DEBUG("d3d11.dll already in memory");
+        LOG_DEBUG("d3d11.dll already in memory, hooking D3D11 device creation");
         D3D11Hooks::Hook(d3d11Module);
+    }
+    else
+    {
+        LOG_DEBUG("d3d11.dll not in memory yet, waiting for load");
     }
 
     // Vulkan
