@@ -434,7 +434,99 @@ static HRESULT hkD3D11CreateDeviceAndSwapChain(IDXGIAdapter* pAdapter, D3D_DRIVE
     {
         LOG_WARN("Overlay call!");
 
-        _skipDx11Create = true;
+            if ((State::Instance().gameQuirks & GameQuirk::ForceD3D11On12) && o_D3D11On12CreateDevice != nullptr &&
+        ppDevice != nullptr && ppSwapChain != nullptr && pSwapChainDesc != nullptr)
+    {
+        D3D_FEATURE_LEVEL on12Level = (FeatureLevels > 0 && pFeatureLevels != nullptr) ? pFeatureLevels[0]
+                                                                                    : D3D_FEATURE_LEVEL_11_1;
+        ID3D12Device* dx12Device = State::Instance().currentD3D12Device;
+        ID3D12CommandQueue* dx12Queue = State::Instance().currentCommandQueue;
+
+        if (dx12Device == nullptr && pAdapter != nullptr)
+            dx12Device = WithDx12::RequestD3D12Device(on12Level, pAdapter);
+
+        if (dx12Device != nullptr && dx12Queue == nullptr)
+        {
+            D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+            queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+            queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+            if (SUCCEEDED(dx12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&dx12Queue))))
+            {
+                LOG_INFO("D3D11On12 swapchain experiment: created D3D12 command queue {}", (UINT64) dx12Queue);
+            }
+        }
+
+        if (dx12Device != nullptr && dx12Queue != nullptr)
+        {
+            if (State::Instance().currentD3D12Device == nullptr || State::Instance().currentCommandQueue == nullptr)
+                WithDx12::SetD3D12Objects(dx12Device, dx12Queue, D3D12_COMMAND_LIST_TYPE_DIRECT);
+
+            DXGI_SWAP_CHAIN_DESC swapDesc = localDesc;
+            ID3D11Device* on12Device = nullptr;
+            ID3D11DeviceContext* on12Context = nullptr;
+            D3D_FEATURE_LEVEL chosenLevel = on12Level;
+            HRESULT createResult = o_D3D11On12CreateDevice(dx12Device, Flags, pFeatureLevels, FeatureLevels,
+                                                        reinterpret_cast<IUnknown* const*>(&dx12Queue), 1, 0,
+                                                        &on12Device, &on12Context, &chosenLevel);
+
+            if (createResult == S_OK && on12Device != nullptr)
+            {
+                IDXGIDevice* dxgiDevice = nullptr;
+                if (SUCCEEDED(on12Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))) && dxgiDevice != nullptr)
+                {
+                    IDXGIAdapter* dxgiAdapter = nullptr;
+                    if (SUCCEEDED(dxgiDevice->GetAdapter(&dxgiAdapter)))
+                    {
+                        IDXGIFactory* dxgiFactory = nullptr;
+                        if (FAILED(dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory))))
+                            dxgiDevice->GetParent(IID_PPV_ARGS(&dxgiFactory));
+
+                        if (dxgiFactory != nullptr)
+                        {
+                            IDXGISwapChain* on12SwapChain = nullptr;
+                            HRESULT swapResult = dxgiFactory->CreateSwapChain(on12Device, &swapDesc, &on12SwapChain);
+
+                            if (SUCCEEDED(swapResult) && on12SwapChain != nullptr)
+                            {
+                                if (pFeatureLevel != nullptr)
+                                    *pFeatureLevel = chosenLevel;
+                                if (ppDevice != nullptr)
+                                    *ppDevice = on12Device;
+                                if (ppImmediateContext != nullptr)
+                                    *ppImmediateContext = on12Context;
+                                *ppSwapChain = on12SwapChain;
+
+                                State::Instance().d3d11Devices.push_back(on12Device);
+                                HookToDeviceLocal(on12Device);
+
+                                IDXGISwapChain* realSwapChain = nullptr;
+                                if (!Util::CheckForRealObject(__FUNCTION__, on12SwapChain, (IUnknown**) &realSwapChain))
+                                    realSwapChain = on12SwapChain;
+                                State::Instance().currentRealSwapchain = realSwapChain;
+                                State::Instance().screenWidth = static_cast<float>(pSwapChainDesc->BufferDesc.Width);
+                                State::Instance().screenHeight = static_cast<float>(pSwapChainDesc->BufferDesc.Height);
+
+                                LOG_INFO("ForceD3D11On12: swapchain path created D3D11 device and swapchain");
+                                SAFE_RELEASE(dxgiFactory);
+                                SAFE_RELEASE(dxgiAdapter);
+                                SAFE_RELEASE(dxgiDevice);
+                                return swapResult;
+                            }
+                            LOG_ERROR("ForceD3D11On12: swapchain experiment CreateSwapChain failed; native fallback");
+                            if (on12SwapChain != nullptr)
+                                on12SwapChain->Release();
+                        }
+                        SAFE_RELEASE(dxgiFactory);
+                    }
+                    SAFE_RELEASE(dxgiAdapter);
+                }
+                SAFE_RELEASE(dxgiDevice);
+            }
+            LOG_ERROR("ForceD3D11On12: swapchain experiment CreateDevice failed; native fallback");
+        }
+    }
+
+_skipDx11Create = true;
         State::Instance().skipParentWrapping = true;
 
         auto result = o_D3D11CreateDeviceAndSwapChain(pAdapter, DriverType, Software, Flags, pFeatureLevels,
