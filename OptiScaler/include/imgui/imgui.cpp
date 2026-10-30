@@ -8602,7 +8602,11 @@ void ImGui::UpdateCurrentFontSize()
         g.Font->CurrentRasterizerDensity = g.FontRasterizerDensity;
     g.FontBaked = (g.Font != NULL) ? g.Font->GetFontBaked(final_size) : NULL;
     g.FontSize = final_size;
-    g.FontScale = (g.Font != NULL) ? (g.FontSize / g.FontBaked->Size) : 0.0f;
+    // Guard g.FontBaked against NULL: GetFontBaked() can fail (locked atlas, zero-sized
+    // window, non-finite rasterizer density). Previously only g.Font was tested, which
+    // NULL-deref'd g.FontBaked->Size -> C0000005 read of 0x14(NULL) at
+    // ImGui::UpdateCurrentFontSize (RVA 0x2b85e0) via ImGui::SetCurrentFont.
+    g.FontScale = (g.Font != NULL && g.FontBaked != NULL) ? (g.FontSize / g.FontBaked->Size) : 1.0f;
     g.DrawListSharedData.FontSize = g.FontSize;
     g.DrawListSharedData.FontScale = g.FontScale;
 }
