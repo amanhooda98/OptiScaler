@@ -2223,6 +2223,32 @@ static void SpoofNative16BitShaderOps(ID3D12Device* device)
     if (isSpoofed())
         return;
 
+    bool isNvidia = false;
+    LUID adapterLuid = device->GetAdapterLuid();
+    IDXGIFactory1* factory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+    {
+        for (UINT i = 0;; i++)
+        {
+            IDXGIAdapter* adapter = nullptr;
+            if (factory->EnumAdapters(i, &adapter) != S_OK)
+                break;
+            DXGI_ADAPTER_DESC desc = {};
+            if (SUCCEEDED(adapter->GetDesc(&desc)) && desc.AdapterLuid.LowPart == adapterLuid.LowPart &&
+                desc.AdapterLuid.HighPart == adapterLuid.HighPart)
+            {
+                isNvidia = (desc.VendorId == 0x10DE);
+                adapter->Release();
+                break;
+            }
+            adapter->Release();
+        }
+        factory->Release();
+    }
+
+    if (!isNvidia)
+        return;
+
     auto base = reinterpret_cast<uint8_t*>(device);
     constexpr size_t knownOffset = 0x188;
     if ((base[knownOffset] & 1) == 0)
