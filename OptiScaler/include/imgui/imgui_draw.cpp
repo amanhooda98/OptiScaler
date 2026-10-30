@@ -5228,7 +5228,15 @@ ImFontBaked* ImFont::GetFontBaked(float size, float density)
     ImFontAtlasBuilder* builder = atlas->Builder;
     baked = ImFontAtlasBakedGetOrAdd(atlas, this, size, CurrentRasterizerDensity);
     if (baked == NULL)
+    {
+        // Never hand callers a NULL baked handle: many rendering helpers dereference
+        // baked->Size unconditionally. Fall back to the last good baked variant (if
+        // any) so a transient atlas lock / density failure degrades gracefully
+        // instead of C0000005-ing during text rendering.
+        if (LastBaked != NULL)
+            return LastBaked;
         return NULL;
+    }
     baked->LastUsedFrame = builder->FrameCount;
     LastBaked = baked;
     return baked;
@@ -5297,6 +5305,8 @@ const char* ImFont::CalcWordWrapPosition(float size, const char* text, const cha
     // e.g.: "The tropical fish" with ~5 characters worth of width --> "The tr" "opical" "fish"
 
     ImFontBaked* baked = GetFontBaked(size);
+    if (baked == NULL || baked->Size == 0.0f)
+        return;
     const float scale = size / baked->Size;
 
     float line_width = 0.0f;
@@ -5395,6 +5405,8 @@ ImVec2 ImFont::CalcTextSizeA(float size, float max_width, float wrap_width, cons
 
     const float line_height = size;
     ImFontBaked* baked = GetFontBaked(size);
+    if (baked == NULL || baked->Size == 0.0f)
+        return;
     const float scale = size / baked->Size;
 
     ImVec2 text_size = ImVec2(0, 0);
@@ -5476,12 +5488,14 @@ ImVec2 ImFont::CalcTextSizeA(float size, float max_width, float wrap_width, cons
 void ImFont::RenderChar(ImDrawList* draw_list, float size, const ImVec2& pos, ImU32 col, ImWchar c, const ImVec4* cpu_fine_clip)
 {
     ImFontBaked* baked = GetFontBaked(size);
+    if (baked == NULL)
+        return;
     const ImFontGlyph* glyph = baked->FindGlyph(c);
     if (!glyph || !glyph->Visible)
         return;
     if (glyph->Colored)
         col |= ~IM_COL32_A_MASK;
-    float scale = (size >= 0.0f) ? (size / baked->Size) : 1.0f;
+    float scale = (size >= 0.0f && baked != NULL && baked->Size != 0.0f) ? (size / baked->Size) : 1.0f;
     float x = IM_TRUNC(pos.x);
     float y = IM_TRUNC(pos.y);
 
@@ -5526,6 +5540,8 @@ begin:
 
     const float line_height = size;
     ImFontBaked* baked = GetFontBaked(size);
+    if (baked == NULL || baked->Size == 0.0f)
+        return;
 
     const float scale = size / baked->Size;
     const float origin_x = x;

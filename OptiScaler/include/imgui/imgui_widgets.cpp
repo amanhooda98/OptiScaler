@@ -3964,6 +3964,8 @@ static ImVec2 InputTextCalcTextSize(ImGuiContext* ctx, const char* text_begin, c
     //ImFont* font = g.Font;
     ImFontBaked* baked = g.FontBaked;
     const float line_height = g.FontSize;
+    if (baked == NULL || baked->Size == 0.0f)
+        return;
     const float scale = line_height / baked->Size;
 
     ImVec2 text_size = ImVec2(0, 0);
