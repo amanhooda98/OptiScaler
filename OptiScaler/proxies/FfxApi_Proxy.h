@@ -14,6 +14,7 @@
 #include <fsr4/FSR4DriverProviderDx12.h>
 #include <fsr4/FSR4Models.h>
 #include <fsr4/FSR4Presets.h>
+#include <fsr4/FSR4Variants.h>
 
 #include "ffx_api.h"
 #include <detours/detours.h>
@@ -112,14 +113,21 @@ class FfxApiProxy
     // FFX modules that Opti creates its upscalers with
     static bool IsUpscalerModule(HMODULE module)
     {
-        return module != nullptr && (module == main_dx12.dll || module == upscaling_dx12.dll);
+        return module != nullptr &&
+               (module == main_dx12.dll || module == upscaling_dx12.dll || FSR4Variants::IsVariantModule(module));
     }
 
     // Module that runs the DX12 upscaler with this version id
     static HMODULE UpscalerModule(uint64_t versionId)
     {
-        if (versionId != 0 && versionId == FSR4DriverProviderDx12::VersionId())
-            return FSR4DriverProviderDx12::LoadedModule();
+        if (versionId != 0)
+        {
+            if (versionId == FSR4DriverProviderDx12::VersionId())
+                return FSR4DriverProviderDx12::LoadedModule();
+
+            if (auto variantModule = FSR4Variants::VariantModule(versionId); variantModule != nullptr)
+                return variantModule;
+        }
 
         return upscaling_dx12.dll != nullptr ? upscaling_dx12.dll : main_dx12.dll;
     }
@@ -1209,6 +1217,12 @@ class FfxApiProxy
             return FSR4DriverProviderDx12::CreateContext(context, desc, memCb);
         }
 
+        if (auto overrideVersion = FindOverrideVersion(desc);
+            type == FFXStructType::Upscaling && overrideVersion && FSR4Variants::IsVariantVersion(*overrideVersion))
+        {
+            return FSR4Variants::CreateContext(*overrideVersion, context, desc, memCb);
+        }
+
         auto isFg = type == FFXStructType::FG || type == FFXStructType::SwapchainDX12;
 
         ffxReturnCode_t result = FFX_API_RETURN_ERROR;
@@ -1275,6 +1289,9 @@ class FfxApiProxy
     {
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::DestroyContext(context, memCb);
+
+        if (FSR4Variants::OwnsContext(context))
+            return FSR4Variants::DestroyContext(context, memCb);
 
         ffxReturnCode_t result = FFX_API_RETURN_ERROR;
         auto type = FFXStructType::Unknown;
@@ -1380,6 +1397,9 @@ class FfxApiProxy
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Configure(context, desc);
 
+        if (FSR4Variants::OwnsContext(context))
+            return FSR4Variants::Configure(context, desc);
+
         auto type = GetType(desc->type);
 
         if (type == FFXStructType::General && contextToType.contains(*context))
@@ -1424,6 +1444,9 @@ class FfxApiProxy
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Query(context, desc);
 
+        if (FSR4Variants::OwnsContext(context))
+            return FSR4Variants::Query(context, desc);
+
         if (desc->type == FFX_API_QUERY_DESC_TYPE_GET_VERSIONS && GetIndirectType(desc) == FFXStructType::Upscaling)
         {
             return D3D12_QueryUpscalerVersions(reinterpret_cast<ffxQueryDescGetVersions*>(desc),
@@ -1458,6 +1481,10 @@ class FfxApiProxy
         names.resize(sdkCount);
 
         FSR4DriverProviderDx12::AddToVersionList(ids, names, driverListing);
+
+        // The game gets the upscalers of the SDK and the driver, the variants are only offered in Opti's menu
+        if (driverListing == FSR4DriverProviderDx12::Listing::Always)
+            FSR4Variants::AddToVersionList(ids, names);
 
         if (desc->outputCount == nullptr)
             return FFX_API_RETURN_ERROR_PARAMETER;
@@ -1537,6 +1564,9 @@ class FfxApiProxy
     {
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Dispatch(context, desc);
+
+        if (FSR4Variants::OwnsContext(context))
+            return FSR4Variants::Dispatch(context, desc);
 
         auto type = GetType(desc->type);
         auto isFg = type == FFXStructType::FG || type == FFXStructType::SwapchainDX12;
