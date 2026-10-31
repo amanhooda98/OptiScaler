@@ -152,6 +152,9 @@
     <ClInclude Include="proxies\FfxApi_Proxy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="proxies\FfxModule.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\Vulkan_Hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -599,6 +602,9 @@
     <ClInclude Include="upscalers\FeatureProvider_Dx11.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="misc\CustomProviders.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="upscalers\FeatureProvider_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1029,6 +1035,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="framegen\nvngx\IFGNvngx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="framegen\nvngx\Nvngx_Custom.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="framegen\nvngx\Nvngx_Nukems.h">
@@ -1791,6 +1800,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="framegen\nvngx\Nvngx_FFX.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="framegen\nvngx\Nvngx_Custom.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="framegen\nvngx\Nvngx_Nukems.cpp">
